@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<robot name="amr_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:property name="wheel_radius" value="0.1" />
+  <xacro:property name="wheel_width" value="0.05" />
+  <xacro:property name="chassis_length" value="0.6" />
+  <xacro:property name="chassis_width" value="0.5" />
+  <xacro:property name="chassis_height" value="0.1" />
+
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+      </geometry>
+      <origin xyz="0 0 ${chassis_height/2}"/>
+      <material name="gray">
+        <color rgba="0.6 0.6 0.6 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Wheels -->
+  <xacro:macro name="wheel" params="prefix x y">
+    <link name="${prefix}_wheel_link">
+      <visual>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+        <origin xyz="${x} ${y} ${wheel_radius}" rpy="1.5707 0 0"/>
+        <material name="black">
+          <color rgba="0 0 0 1"/>
+        </material>
+      </visual>
+    </link>
+  </xacro:macro>
+
+  <xacro:wheel prefix="left" x="0" y="0.25"/>
+  <xacro:wheel prefix="right" x="0" y="-0.25"/>
+
+  <!-- Lidar -->
+  <link name="lidar_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.03" length="0.02"/>
+      </geometry>
+      <origin xyz="0 0 ${chassis_height+0.1}"/>
+      <material name="blue">
+        <color rgba="0.2 0.2 1 1.0"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0 0 0"/>
+  </joint>
+
+  <!-- Camera -->
+  <link name="oakd_link">
+    <visual>
+      <geometry>
+        <box size="0.04 0.04 0.04"/>
+      </geometry>
+      <origin xyz="0.1 0 ${chassis_height+0.15}"/>
+      <material name="green">
+        <color rgba="0 1 0 1.0"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="oakd_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="oakd_link"/>
+    <origin xyz="0 0 0"/>
+  </joint>
+</robot>

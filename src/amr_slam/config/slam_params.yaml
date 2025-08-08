@@ -1,0 +1,18 @@
+rtabmap:
+  publish_tf: true
+  subscribe_scan: true
+  subscribe_depth: true
+  subscribe_rgbd: true
+  queue_size: 10
+  approx_sync: true
+  frame_id: base_link
+  odom_frame_id: odom
+  map_frame_id: map
+  
+  RGBD/LinearUpdate: 0.1
+  RGBD/AngularUpdate: 0.05
+  RGBD/NeighborLinkRefining: true
+  RGBD/ProximityBySpace: true
+  Grid/FromDepth: true
+  Grid/3D: false
+
