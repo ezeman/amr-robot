@@ -1,0 +1,14 @@
+[Unit]
+Description=AGV Web UI Static Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/narong/agv_ws/web_ui
+ExecStart=/usr/bin/python3 -m http.server 8090 --bind 0.0.0.0
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

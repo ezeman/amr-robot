@@ -1,0 +1,11 @@
+frame_id: map
+waypoints:
+- x: 0.0139
+  y: 0.0095
+  yaw_deg: -0.74
+- x: -0.087
+  y: 0.0025
+  yaw_deg: -1.39
+- x: 0.0305
+  y: 0.1513
+  yaw_deg: 72.68

@@ -1,0 +1,5 @@
+MAP_NAME=siteA_fixed_v1
+CREATED_AT=2025-12-21T11:50:10+07:00
+YAML_SHA256=0f61cf1e3782f06e59d15a23d1c94ba227bb80248d59a55a1c9cc6c0d4eafe17
+PGM_SHA256=f6beefe315bff2807924943eb29a099d47ce4ef8ba4dfcec2317dba3a961e740
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

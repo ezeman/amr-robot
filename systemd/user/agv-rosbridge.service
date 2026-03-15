@@ -1,0 +1,16 @@
+[Unit]
+Description=AGV ROSBridge WebSocket Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/narong/agv_ws
+Environment=HOME=/home/narong
+Environment=AGV_WS=/home/narong/agv_ws
+ExecStart=/bin/bash -lc 'exec /home/narong/agv_ws/scripts/agv.sh ros2 launch rosbridge_server rosbridge_websocket_launch.xml'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

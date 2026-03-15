@@ -1,0 +1,5 @@
+MAP_NAME=ud-bl1-f1-test
+CREATED_AT=2026-02-09T18:33:47+07:00
+YAML_SHA256=ddcdea47b475a22cce23acbc8fb4ededbacf38a3bf6b1e9d0226ae7e1a5f9d8b
+PGM_SHA256=7d694387de90888ba16efc9281bf0faca97ddd610dad557b41614d8061339660
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

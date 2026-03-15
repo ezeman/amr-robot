@@ -1,0 +1,48 @@
+# amr_bringup/config/scan_filter.yaml
+/**:
+  ros__parameters:
+    filter1:
+      name: remove_robot_self_hits
+      type: laser_filters/LaserScanBoxFilter
+      params:
+        # Remove points inside a small box around the robot to suppress hits on
+        # posts/chassis in the scan plane. Tune these bounds to your robot.
+        box_frame: base_link
+        # If Nav2 reports "detected collision ahead", expand this box until
+        # robot chassis/post hits disappear from /scan.
+        # NOTE: These bounds are intentionally a bit larger than the default
+        # footprint to cover common "scan hits the robot frame/posts" cases.
+        # Tighten later once navigation is stable.
+        min_x: -0.65
+        max_x:  0.85
+        min_y: -0.55
+        max_y:  0.55
+        min_z: -1.0
+        max_z:  1.5
+        invert: false
+
+    filter2:
+      name: keep_front_corridor
+      type: laser_filters/LaserScanBoxFilter
+      params:
+        box_frame: base_link
+        # Keep a small rear margin so backup behaviors still see obstacles.
+        min_x: -1.0
+        max_x: 8.0        # แนะนำเริ่ม 8m (6–10m ได้)
+        min_y: -2.2       # เผื่อด้านละ 2m + margin
+        max_y:  2.2
+        min_z: -1.0
+        max_z:  1.5
+        invert: True  # keep only points inside this box (AGV corridor focus)
+
+    filter3:
+      name: range_filter
+      type: laser_filters/LaserScanRangeFilter
+      params:
+        use_message_range_limits: false
+        # Keep this low so close obstacles (people/pallets) still appear in /scan.
+        # Self-hits should be removed by filter1 (box filter).
+        lower_threshold: 0.10
+        upper_threshold: 8.0   # ให้สอดคล้องกับ max_x
+        lower_replacement_value: .nan
+        upper_replacement_value: .nan

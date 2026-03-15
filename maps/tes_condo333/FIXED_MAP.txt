@@ -1,0 +1,5 @@
+MAP_NAME=tes_condo333
+CREATED_AT=2026-02-08T20:22:34+07:00
+YAML_SHA256=6afcfc2d18dd16aed71003b4809bcd494d60579e177d70dd1866dd6bb46d9fa1
+PGM_SHA256=3b5fb00412e40fb85745b468f3044c2e067864d1eeea332fadf8e911c96b8993
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

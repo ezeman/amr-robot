@@ -1,0 +1,5 @@
+MAP_NAME=Map-A-Fl5
+CREATED_AT=2026-02-11T17:58:37+07:00
+YAML_SHA256=55ab7d4997f652a6cb778b18dcdc80416e751f3bb4e14c3ebc2b386b4d7a673f
+PGM_SHA256=6ccbd647a52c9df9a6492c94e287992a0a66449ffe5a7b9ffcd2c2f82b8c6c3b
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

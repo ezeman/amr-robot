@@ -1,0 +1,5 @@
+MAP_NAME=test-con01
+CREATED_AT=2026-02-25T15:13:02+07:00
+YAML_SHA256=97aff1eaa778ac3b7b3bf4070343534cd1bd936e733ba5e782f129888b9bf073
+PGM_SHA256=5431e48a863d17ec7fb8f1899d9e8b492890eb022684aa9cf8e39fd6bf8b9a02
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

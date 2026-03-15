@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<robot name="agv_base" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- Basic dimensions for a small diff-drive base -->
+  <xacro:property name="base_radius" value="0.20"/>
+  <xacro:property name="base_height" value="0.10"/>
+
+  <link name="base_footprint"/>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 ${base_height * 0.5}" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${base_radius}" length="${base_height}"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.2 0.2 0.2 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${base_height * 0.5}" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${base_radius}" length="${base_height}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="15.0"/>
+      <origin xyz="0 0 ${base_height * 0.5}" rpy="0 0 0"/>
+      <inertia ixx="0.8" ixy="0.0" ixz="0.0" iyy="0.8" iyz="0.0" izz="1.2"/>
+    </inertial>
+  </link>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.03" rpy="0 0 0"/>
+  </joint>
+
+  <link name="lidar_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.04" length="0.05"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.1 0.3 0.8 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="lidar_mount" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0.18 0.0 0.23" rpy="0 0 0"/>
+  </joint>
+
+  <link name="imu_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.02"/>
+      </geometry>
+      <material name="orange">
+        <color rgba="0.9 0.5 0.1 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="imu_mount" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <!-- IMU mounted at front center, inset 5 cm from the front edge; height unchanged -->
+    <origin xyz="0.15 0.0 0.15" rpy="0 0 0"/>
+  </joint>
+</robot>

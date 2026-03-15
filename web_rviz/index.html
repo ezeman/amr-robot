@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AGV Web RViz</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>AGV Web RViz</h1>
+        <p>Map, laser, robot pose, plans, and click-to-command controls.</p>
+      </div>
+      <div class="chips">
+        <span id="connStatus" class="chip">ROS: Disconnected</span>
+        <span id="healthStatus" class="chip">Health: Unknown</span>
+        <span id="modeStatus" class="chip">Mode: Inspect</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel controls">
+        <h2>Connection</h2>
+        <label>
+          Rosbridge URL
+          <input id="wsUrl" type="text" value="ws://192.168.1.41:9090" />
+        </label>
+        <label class="toggle"><input id="autoReconnect" type="checkbox" checked /> Auto reconnect</label>
+        <label>
+          Reconnect Delay (ms)
+          <input id="reconnectDelayMs" type="number" value="2000" min="500" max="15000" step="100" />
+        </label>
+        <div class="row">
+          <button id="btnConnect" class="btn primary">Connect</button>
+          <button id="btnDisconnect" class="btn danger">Disconnect</button>
+        </div>
+
+        <h2>Interaction</h2>
+        <div class="row wrap">
+          <button id="btnModeInspect" class="btn">Inspect</button>
+          <button id="btnModeInit" class="btn">Set Initial Pose</button>
+          <button id="btnModeGoal" class="btn">Set Nav Goal</button>
+          <button id="btnFitMap" class="btn">Fit Map</button>
+          <button id="btnCenterRobot" class="btn">Center Robot</button>
+          <button id="btnFollowRobot" class="btn">Follow Robot: Off</button>
+          <button id="btnRotateMap" class="btn">Heading Up: Off</button>
+          <button id="btnResetView" class="btn">Reset View</button>
+        </div>
+        <p class="hint">Set pose/goal: click once for position, click second time for heading.</p>
+
+        <h2>Layers</h2>
+        <label class="toggle"><input id="layerMap" type="checkbox" checked /> Occupancy Map</label>
+        <label class="toggle"><input id="layerScan" type="checkbox" checked /> Laser Scan <span style="color:#ffb84d">&#9632;</span></label>
+        <label class="toggle"><input id="layerRobot" type="checkbox" checked /> Robot Pose
+          <span style="color:#8fb7cb">&#9679;</span>tf
+          <span style="color:#c97dff">&#9679;</span>slam
+          <span style="color:#f5b545">&#9679;</span>odom
+          <span style="color:#24d18f">&#9679;</span>amcl
+        </label>
+        <label class="toggle"><input id="layerGlobalPlan" type="checkbox" checked /> Global Plan (/plan)</label>
+        <label class="toggle"><input id="layerLocalPlan" type="checkbox" checked /> Local Plan (/local_plan)</label>
+
+        <h2>Live Info</h2>
+        <pre id="infoBox" class="info"></pre>
+
+        <h2>Teleop Control</h2>
+        <div class="teleop-speed">
+          <label>Linear <span id="linSpeedVal">0.20</span> m/s
+            <input id="linSpeed" type="range" min="0.05" max="1.0" step="0.05" value="0.20" />
+          </label>
+          <label>Angular <span id="angSpeedVal">0.50</span> rad/s
+            <input id="angSpeed" type="range" min="0.1" max="3.0" step="0.1" value="0.50" />
+          </label>
+        </div>
+        <div class="teleop-pad">
+          <button id="btnTurnLeft" class="btn teleop-btn">&#8630;</button>
+          <button id="btnForward" class="btn teleop-btn">&#9650;</button>
+          <button id="btnTurnRight" class="btn teleop-btn">&#8631;</button>
+          <button id="btnLeft" class="btn teleop-btn">&#9664;</button>
+          <button id="btnStop" class="btn danger teleop-btn">&#9632;</button>
+          <button id="btnRight" class="btn teleop-btn">&#9654;</button>
+          <div></div>
+          <button id="btnBackward" class="btn teleop-btn">&#9660;</button>
+          <div></div>
+        </div>
+        <p class="hint">Keyboard: W/S = fwd/back, A/D = strafe, Q/E = turn, Space = stop</p>
+      </section>
+
+      <section class="panel viewer">
+        <canvas id="rvizCanvas"></canvas>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

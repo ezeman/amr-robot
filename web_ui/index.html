@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AGV Ops Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow bg-glow-a"></div>
+    <div class="bg-glow bg-glow-b"></div>
+
+    <header class="topbar">
+      <div>
+        <h1>AGV Ops Console</h1>
+        <p>Control mapping, waypoints, navigation, and mission status from any device.</p>
+      </div>
+      <div class="pill-group">
+        <span class="pill" id="apiState">API: Unknown</span>
+        <span class="pill" id="sseState">Events: Disconnected</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="card config-card">
+        <h2>Connection</h2>
+        <div class="grid two">
+          <label>
+            API Base URL
+            <input id="baseUrl" type="text" value="http://127.0.0.1:8088" />
+          </label>
+          <label>
+            API Key (optional)
+            <input id="apiKey" type="password" placeholder="AGV_API_KEY" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnCheckHealth" class="btn primary">Check Health</button>
+          <button id="btnConnectEvents" class="btn">Connect Events</button>
+          <button id="btnDisconnectEvents" class="btn danger">Disconnect Events</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Mission State</h2>
+        <div class="state-grid">
+          <div class="state-item" data-name="slam">SLAM</div>
+          <div class="state-item" data-name="localization">Localization</div>
+          <div class="state-item" data-name="navigation">Navigation</div>
+          <div class="state-item" data-name="waypoint_record">Waypoint Record</div>
+          <div class="state-item" data-name="route_follow">Route Follow</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Mission Presets</h2>
+        <div class="grid two">
+          <label>
+            Preset Map Name
+            <input id="presetMapName" type="text" value="cabinet_floor1_v1" />
+          </label>
+          <label>
+            Preset Route File
+            <input id="presetRouteFile" type="text" value="cabinet_route_v1.yaml" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnPresetStartMapping" class="btn primary">Preset: Start Mapping</button>
+          <button id="btnPresetSaveMap" class="btn">Preset: Save Fixed Map</button>
+          <button id="btnPresetStartDelivery" class="btn primary">Preset: Start Delivery Mission</button>
+          <button id="btnPresetStopAll" class="btn danger">Preset: Stop All Mission</button>
+        </div>
+        <p id="presetStatus" class="hint">Preset status: idle</p>
+      </section>
+
+      <section class="card">
+        <h2>SLAM & Map</h2>
+        <div class="grid three">
+          <label>
+            Lidar Product
+            <input id="slamLidarProduct" type="text" value="LDLiDAR_STL27L" />
+          </label>
+          <label>
+            Lidar Baud
+            <input id="slamLidarBaud" type="number" value="921600" />
+          </label>
+          <label>
+            Lidar Port
+            <input id="slamLidarPort" type="text" value="/dev/lidar" />
+          </label>
+        </div>
+        <div class="grid two">
+          <label>
+            Map Name (save)
+            <input id="mapName" type="text" value="cabinet_floor1_v1" />
+          </label>
+          <label>
+            Base Angular Sign
+            <input id="baseAngularSign" type="number" step="0.1" value="1.0" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnSlamStart" class="btn primary">Start SLAM</button>
+          <button id="btnSlamStop" class="btn danger">Stop SLAM</button>
+          <button id="btnSaveMap" class="btn">Save Map</button>
+          <button id="btnListMaps" class="btn">Refresh Maps</button>
+        </div>
+        <div id="mapsList" class="chips"></div>
+      </section>
+
+      <section class="card">
+        <h2>Localization & Navigation</h2>
+        <div class="grid two">
+          <label>
+            Map (name or full yaml path)
+            <input id="navMap" type="text" placeholder="corridor_fixed_v1" />
+          </label>
+          <label>
+            Yield Requester
+            <select id="useYield">
+              <option value="true" selected>Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnLocStart" class="btn primary">Start Localization</button>
+          <button id="btnLocStop" class="btn danger">Stop Localization</button>
+          <button id="btnNavStart" class="btn primary">Start Navigation</button>
+          <button id="btnNavStop" class="btn danger">Stop Navigation</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Waypoints</h2>
+        <div class="grid two">
+          <label>
+            Record Output Path
+            <input id="recordOutput" type="text" value="/home/narong/agv_ws/routes/cabinet_route_v1.yaml" />
+          </label>
+          <label>
+            Route File (name or full path)
+            <input id="routeFile" type="text" placeholder="cabinet_route_v1.yaml" />
+          </label>
+        </div>
+        <div class="grid three">
+          <label>
+            Yaw Mode
+            <select id="yawMode">
+              <option value="heading" selected>heading</option>
+              <option value="from_file">from_file</option>
+              <option value="zero">zero</option>
+            </select>
+          </label>
+          <label>
+            Start Mode
+            <select id="startMode">
+              <option value="nearest" selected>nearest</option>
+              <option value="fixed">fixed</option>
+            </select>
+          </label>
+          <label>
+            Pause (sec)
+            <input id="pauseSec" type="number" step="0.1" value="3.0" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnRecordStart" class="btn primary">Start Record Waypoints</button>
+          <button id="btnRecordStop" class="btn danger">Stop Record</button>
+          <button id="btnRouteStart" class="btn primary">Start Route</button>
+          <button id="btnRouteStop" class="btn danger">Stop Route</button>
+          <button id="btnListRoutes" class="btn">Refresh Routes</button>
+        </div>
+        <div id="routesList" class="chips"></div>
+      </section>
+
+      <section class="card">
+        <h2>System Tools</h2>
+        <div class="actions">
+          <button id="btnStatus" class="btn">Get Status</button>
+          <button id="btnValidateConfig" class="btn">Validate Config</button>
+          <button id="btnKillRos" class="btn danger">Kill ROS Processes</button>
+        </div>
+      </section>
+
+      <section class="card full">
+        <h2>Realtime Events</h2>
+        <pre id="eventsLog" class="log"></pre>
+      </section>
+
+      <section class="card full">
+        <h2>API Response</h2>
+        <pre id="responseLog" class="log"></pre>
+      </section>
+    </main>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

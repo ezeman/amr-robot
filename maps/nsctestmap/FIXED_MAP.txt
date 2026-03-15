@@ -1,0 +1,5 @@
+MAP_NAME=nsctestmap
+CREATED_AT=2026-02-07T14:16:35+07:00
+YAML_SHA256=ddeb6deae638af07f0ac3d49a871067e358694d8aaaf1e722f7ba26fe8a2d950
+PGM_SHA256=c5dc5c2df6e10304b282b6db5fca821288d663048d4133f6cc3cbd3268f3588c
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

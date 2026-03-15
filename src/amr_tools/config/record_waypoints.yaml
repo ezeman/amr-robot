@@ -1,0 +1,12 @@
+record_waypoints:
+  ros__parameters:
+    map_frame: map
+    base_frame: base_link
+    output_path: ""
+    straight_interval_m: 1.0
+    turn_interval_m: 0.3
+    turning_curvature_threshold_rad_per_m: 0.35
+    min_step_m: 0.02
+    sample_rate_hz: 20.0
+    max_duration_sec: 0.0
+    max_points: 0

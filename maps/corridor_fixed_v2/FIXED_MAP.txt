@@ -1,0 +1,5 @@
+MAP_NAME=corridor_fixed_v2
+CREATED_AT=2025-12-21T11:27:11+07:00
+YAML_SHA256=013c760f1d7e731fd1dca4e90a99e3a2e82da6420943e493c57c3262b7fe56ec
+PGM_SHA256=fa6bc5fde9a61f21ddcdee3738254f1be84bb1a0b534b92a2b8031c9612be093
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

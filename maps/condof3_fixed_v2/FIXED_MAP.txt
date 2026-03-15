@@ -1,0 +1,5 @@
+MAP_NAME=condof3_fixed_v2
+CREATED_AT=2026-02-07T14:04:16+07:00
+YAML_SHA256=671ac05115100186372843a3dc240e9c51e1370873b9abf418e122bdbd6252a2
+PGM_SHA256=66518f8a6dd6f7897639d320f2e08a9b61bf619d4065fc5a6b9b053bc7651b42
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

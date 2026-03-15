@@ -1,0 +1,5 @@
+MAP_NAME=Map-A-Fl1
+CREATED_AT=2026-02-15T11:45:50+07:00
+YAML_SHA256=4c1f01d46b249772c8c98c4853589014bba89040ac215252015b6bf8f13c8434
+PGM_SHA256=1f419e9b9fac9c54c967772ad1efa232e4a84aade93d442bd7b182d88dff2607
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="MainTree" BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <!-- AGV-like: no spin. If blocked, clear costmaps + wait for obstacle to move, then replan. -->
+    <RecoveryNode number_of_retries="20" name="NavigateRecovery">
+      <PipelineSequence name="navigate_with_rpp">
+        <RateController hz="2.0">
+          <Sequence>
+            <GoalUpdated/>
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="{planner_id}"/>
+          </Sequence>
+        </RateController>
+        <FollowPath path="{path}" controller_id="{controller_id}"/>
+        <GoalReached/>
+      </PipelineSequence>
+      <Sequence name="blocked_recovery">
+        <ClearEntireCostmap name="ClearLocalCostmap" service_name="local_costmap/clear_entirely_local_costmap"/>
+        <ClearEntireCostmap name="ClearGlobalCostmap" service_name="global_costmap/clear_entirely_global_costmap"/>
+        <Wait wait_duration="3.0"/>
+        <BackUp backup_dist="0.15" backup_speed="0.06"/>
+      </Sequence>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

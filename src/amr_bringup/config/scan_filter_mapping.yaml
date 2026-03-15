@@ -1,0 +1,31 @@
+# scan_filter_mapping.yaml
+# Mapping should generally keep a wide FOV. We only remove self-hits (robot chassis)
+# and apply a conservative range filter to reduce near-noise and far outliers.
+/**:
+  ros__parameters:
+    filter1:
+      name: remove_robot_self_hits
+      type: laser_filters/LaserScanBoxFilter
+      params:
+        box_frame: base_link
+        # Increase these if the scan still hits robot posts/chassis.
+        # Keep as tight as possible to avoid removing real obstacles near the robot.
+        min_x: -0.65
+        max_x:  0.85
+        min_y: -0.55
+        max_y:  0.55
+        min_z: -1.0
+        max_z:  1.5
+        invert: false
+
+    filter2:
+      name: range_filter
+      type: laser_filters/LaserScanRangeFilter
+      params:
+        use_message_range_limits: false
+        # Keep this low so close obstacles still appear in /scan during mapping.
+        # Self-hits should be removed by filter1 (box filter).
+        lower_threshold: 0.10
+        upper_threshold: 12.0
+        lower_replacement_value: .nan
+        upper_replacement_value: .nan

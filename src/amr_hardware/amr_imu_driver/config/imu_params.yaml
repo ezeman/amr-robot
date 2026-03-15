@@ -1,0 +1,13 @@
+amr_imu_driver:
+  ros__parameters:
+    port: "/dev/imu"
+    baud: 9600
+    frame_id: "imu_link"
+    topic_name: "imu/data"
+    configure_device: false
+    output_rate_hz: 100.0
+    use_quaternion_if_available: true
+    log_first_message: true
+    linear_acceleration_covariance_diagonal: [0.02, 0.02, 0.04]
+    angular_velocity_covariance_diagonal: [0.02, 0.02, 0.02]
+    orientation_covariance_diagonal: [0.02, 0.02, 0.05]

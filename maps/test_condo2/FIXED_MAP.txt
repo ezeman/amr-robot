@@ -1,0 +1,5 @@
+MAP_NAME=test_condo2
+CREATED_AT=2026-02-08T20:18:33+07:00
+YAML_SHA256=4c96e183cb7bad699c42b4248a8c8547869ae43a86e2fe789044fde1a10b7a4a
+PGM_SHA256=d8c05ed4ad62499ed87370cb36780cc724c7b6cec4ff6b4ca11103b7cc98c5b7
+NOTE=This map is declared FIXED. Do not overwrite; create a new map_name for new versions.

@@ -1,0 +1,12 @@
+topic_health_monitor:
+  ros__parameters:
+    scan_topic: /scan
+    imu_topic: /imu/data
+    odom_topic: /wheel/odom
+    timeout_sec: 1.5
+    check_period_sec: 0.5
+    publish_topic: /amr/health_ok
+    detail_topic: /amr/health_detail
+    diagnostics_topic: /diagnostics
+    fail_hard: false
+    fail_grace_sec: 8.0
