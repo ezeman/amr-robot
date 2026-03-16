@@ -31,6 +31,8 @@ def generate_launch_description():
     lidar_angle_crop_max = LaunchConfiguration('lidar_angle_crop_max')
     base_invert_right_motor = LaunchConfiguration('base_invert_right_motor')
     base_angular_sign = LaunchConfiguration('base_angular_sign')
+    use_camera = LaunchConfiguration('use_camera')
+    camera_model = LaunchConfiguration('camera_model')
 
     lidar_topic_name = PythonExpression(
         ["'scan_raw' if '", use_scan_filter, "' == 'true' else 'scan'"]
@@ -53,6 +55,10 @@ def generate_launch_description():
         'config',
         'topic_health_monitor.yaml',
     ])
+
+    depthai_prefix = get_package_share_directory('depthai_ros_driver')
+    camera_launch = os.path.join(depthai_prefix, 'launch', 'camera.launch.py')
+    camera_params_file = os.path.join(depthai_prefix, 'config', 'camera.yaml')
 
     hardware_launch = PathJoinSubstitution([
         FindPackageShare('amr_hardware_bringup'),
@@ -99,6 +105,8 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar_angle_crop_max', default_value='270.0'),
         DeclareLaunchArgument('base_invert_right_motor', default_value='true'),
         DeclareLaunchArgument('base_angular_sign', default_value='1.0'),
+        DeclareLaunchArgument('use_camera', default_value='true'),
+        DeclareLaunchArgument('camera_model', default_value='OAK-D-LITE'),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(hardware_launch),
@@ -152,5 +160,22 @@ def generate_launch_description():
             name='slam_toolbox',
             output='screen',
             parameters=[slam_params_file, {'use_sim_time': use_sim_time}],
+        ),
+
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(camera_launch),
+            condition=IfCondition(use_camera),
+            launch_arguments={
+                'name': 'oak',
+                'camera_model': camera_model,
+                'parent_frame': 'base_link',
+                'cam_pos_x': '0.15',
+                'cam_pos_y': '0.0',
+                'cam_pos_z': '0.25',
+                'cam_pitch': '0.0',
+                'use_rviz': 'false',
+                'rectify_rgb': 'true',
+                'params_file': camera_params_file,
+            }.items(),
         ),
     ])

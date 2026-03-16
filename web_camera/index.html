@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGV Camera &amp; Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>AGV Camera &amp; Detection</h1>
+      <p>Live camera feed with object detection overlay</p>
+    </div>
+    <div class="chips">
+      <span id="connStatus" class="chip">ROS: Disconnected</span>
+      <span id="camStatus" class="chip">Camera: OFF</span>
+      <span id="detStatus" class="chip">Detection: OFF</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Left: Controls -->
+    <section class="panel controls">
+      <h2>Connection</h2>
+      <label>Rosbridge URL
+        <input id="wsUrl" type="text" />
+      </label>
+      <div class="row">
+        <button id="btnConnect" class="btn primary">Connect</button>
+        <button id="btnDisconnect" class="btn danger">Disconnect</button>
+      </div>
+
+      <h2>Camera Settings</h2>
+      <label class="slider-label">Refresh Rate: <span id="refreshVal">2.0</span> fps
+        <input id="refreshRate" type="range" min="0.5" max="15" step="0.5" value="2.0" />
+      </label>
+      <label class="slider-label">JPEG Quality: <span id="qualityVal">80</span>%
+        <input id="jpegQuality" type="range" min="10" max="100" step="5" value="80" />
+      </label>
+
+      <h2>Topics</h2>
+      <label>RGB Image
+        <input id="rgbTopic" type="text" value="/oak/rgb/image_raw/compressed" />
+      </label>
+      <label>Detection
+        <input id="detTopic" type="text" value="/oak/nn/detections" />
+      </label>
+      <label>Depth Image
+        <input id="depthTopic" type="text" value="/oak/stereo/image_raw" />
+      </label>
+
+      <h2>Display</h2>
+      <label class="toggle"><input id="showBoxes" type="checkbox" checked /> Show Bounding Boxes</label>
+      <label class="toggle"><input id="showLabels" type="checkbox" checked /> Show Labels</label>
+      <label class="toggle"><input id="showConf" type="checkbox" checked /> Show Confidence</label>
+      <label class="toggle"><input id="showDepth" type="checkbox" /> Show Depth Overlay</label>
+      <label class="slider-label">Min Confidence: <span id="confVal">0.50</span>
+        <input id="confThreshold" type="range" min="0.1" max="1.0" step="0.05" value="0.50" />
+      </label>
+      <label class="slider-label">Box Opacity: <span id="opacityVal">0.30</span>
+        <input id="boxOpacity" type="range" min="0.0" max="1.0" step="0.05" value="0.30" />
+      </label>
+
+      <h2>Actions</h2>
+      <div class="row wrap">
+        <button id="btnSnapshot" class="btn">&#128247; Snapshot</button>
+        <button id="btnFullscreen" class="btn">&#9974; Fullscreen</button>
+        <button id="btnRecord" class="btn">&#9679; Record</button>
+        <button id="btnClearStats" class="btn">Clear Stats</button>
+      </div>
+
+      <h2>Detection Stats</h2>
+      <div id="statsPanel" class="stats-panel">
+        <div class="stat-row"><span>Frames:</span><span id="statFrames">0</span></div>
+        <div class="stat-row"><span>Detections:</span><span id="statDetections">0</span></div>
+        <div class="stat-row"><span>FPS:</span><span id="statFps">0.0</span></div>
+        <div class="stat-row"><span>Latency:</span><span id="statLatency">—</span></div>
+      </div>
+      <h3>Object Counts</h3>
+      <div id="objectCounts" class="object-counts"></div>
+
+      <h2>Detection Log</h2>
+      <div id="detLog" class="det-log"></div>
+    </section>
+
+    <!-- Center: Camera Viewer -->
+    <section class="panel viewer" id="viewerPanel">
+      <canvas id="camCanvas"></canvas>
+      <div id="overlay" class="overlay">
+        <span id="overlayText">No camera feed</span>
+      </div>
+      <div class="viewer-info">
+        <span id="resolution">—</span>
+        <span id="timestamp">—</span>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

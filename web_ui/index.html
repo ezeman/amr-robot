@@ -56,6 +56,70 @@
       </section>
 
       <section class="card">
+        <h2>Hardware Status</h2>
+        <div class="hw-grid">
+          <div class="hw-item" data-hw="lidar">
+            <span class="hw-icon">&#x1F4E1;</span>
+            <span class="hw-label">LiDAR</span>
+            <span class="hw-status" id="hwLidar">--</span>
+          </div>
+          <div class="hw-item" data-hw="imu">
+            <span class="hw-icon">&#x1F9ED;</span>
+            <span class="hw-label">IMU</span>
+            <span class="hw-status" id="hwImu">--</span>
+          </div>
+          <div class="hw-item" data-hw="encoder">
+            <span class="hw-icon">&#x2699;&#xFE0F;</span>
+            <span class="hw-label">Encoder</span>
+            <span class="hw-status" id="hwEncoder">--</span>
+          </div>
+          <div class="hw-item" data-hw="camera">
+            <span class="hw-icon">&#x1F4F7;</span>
+            <span class="hw-label">3D Camera</span>
+            <span class="hw-status" id="hwCamera">--</span>
+          </div>
+          <div class="hw-item" data-hw="battery">
+            <span class="hw-icon">&#x1F50B;</span>
+            <span class="hw-label">Battery</span>
+            <span class="hw-status" id="hwBattery">--</span>
+            <span class="hw-meta" id="hwBatteryPct">--%</span>
+            <span class="hw-meta" id="hwBatteryVolt">-- V</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Battery Tuning</h2>
+        <div class="grid three">
+          <label>
+            Voltage Scale
+            <input id="batteryScale" type="number" step="0.001" value="2.547" />
+          </label>
+          <label>
+            V Min (0%)
+            <input id="batteryVmin" type="number" step="0.1" value="22.4" />
+          </label>
+          <label>
+            V Max (100%)
+            <input id="batteryVmax" type="number" step="0.1" value="29.2" />
+          </label>
+        </div>
+        <div class="grid two">
+          <label>
+            Percentage Mode
+            <select id="batteryPctMode">
+              <option value="lifepo4_8s" selected>LiFePO4 8S Curve</option>
+              <option value="linear">Linear</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnBatteryReadParams" class="btn">Read Battery Params</button>
+          <button id="btnBatteryApplyParams" class="btn primary">Apply Battery Params</button>
+        </div>
+      </section>
+
+      <section class="card">
         <h2>Mission Presets</h2>
         <div class="grid two">
           <label>
@@ -112,29 +176,6 @@
       </section>
 
       <section class="card">
-        <h2>Localization & Navigation</h2>
-        <div class="grid two">
-          <label>
-            Map (name or full yaml path)
-            <input id="navMap" type="text" placeholder="corridor_fixed_v1" />
-          </label>
-          <label>
-            Yield Requester
-            <select id="useYield">
-              <option value="true" selected>Enabled</option>
-              <option value="false">Disabled</option>
-            </select>
-          </label>
-        </div>
-        <div class="actions">
-          <button id="btnLocStart" class="btn primary">Start Localization</button>
-          <button id="btnLocStop" class="btn danger">Stop Localization</button>
-          <button id="btnNavStart" class="btn primary">Start Navigation</button>
-          <button id="btnNavStop" class="btn danger">Stop Navigation</button>
-        </div>
-      </section>
-
-      <section class="card">
         <h2>Waypoints</h2>
         <div class="grid two">
           <label>
@@ -178,6 +219,29 @@
       </section>
 
       <section class="card">
+        <h2>Localization & Navigation</h2>
+        <div class="grid two">
+          <label>
+            Map (name or full yaml path)
+            <input id="navMap" type="text" placeholder="corridor_fixed_v1" />
+          </label>
+          <label>
+            Yield Requester
+            <select id="useYield">
+              <option value="true" selected>Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnLocStart" class="btn primary">Start Localization</button>
+          <button id="btnLocStop" class="btn danger">Stop Localization</button>
+          <button id="btnNavStart" class="btn primary">Start Navigation</button>
+          <button id="btnNavStop" class="btn danger">Stop Navigation</button>
+        </div>
+      </section>
+
+      <section class="card">
         <h2>System Tools</h2>
         <div class="actions">
           <button id="btnStatus" class="btn">Get Status</button>
@@ -187,13 +251,19 @@
       </section>
 
       <section class="card full">
-        <h2>Realtime Events</h2>
-        <pre id="eventsLog" class="log"></pre>
+        <div class="card-head">
+          <h2>Realtime Events</h2>
+          <button id="btnToggleEventsLog" class="btn" type="button">view</button>
+        </div>
+        <pre id="eventsLog" class="log" hidden></pre>
       </section>
 
       <section class="card full">
-        <h2>API Response</h2>
-        <pre id="responseLog" class="log"></pre>
+        <div class="card-head">
+          <h2>API Response</h2>
+          <button id="btnToggleResponseLog" class="btn" type="button">view</button>
+        </div>
+        <pre id="responseLog" class="log" hidden></pre>
       </section>
     </main>
 

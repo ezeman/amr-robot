@@ -57,6 +57,12 @@ class ApiApp:
             'waypoint_record': False,
             'route_follow': False,
         }
+        self._ros_detect_cache: dict[str, Any] = {}
+        self._ros_detect_time: float = 0.0
+        self._node_health_cache: dict[str, Any] = {}
+        self._node_health_time: float = 0.0
+        self._battery_cache: dict[str, Any] = {}
+        self._battery_time: float = 0.0
         self._route_progress_thread: Optional[threading.Thread] = None
         self._route_progress_stop = threading.Event()
         self._route_feedback_re = re.compile(
@@ -91,10 +97,243 @@ class ApiApp:
                 except ValueError:
                     pass
 
+    # --- External ROS component detection (for systemd-launched nodes) ---
+    _COMPONENT_NODES = {
+        'slam': '/slam_toolbox',
+        'localization': '/amcl',
+        'navigation': '/bt_navigator',
+    }
+
+    def _detect_ros_components(self) -> dict[str, bool]:
+        """Check which mission components are running externally (not via _procs)."""
+        now = time.monotonic()
+        if now - self._ros_detect_time < 5.0 and self._ros_detect_cache:
+            return self._ros_detect_cache
+        try:
+            result = subprocess.run(
+                ['ros2', 'node', 'list'],
+                capture_output=True, text=True, timeout=4.0,
+            )
+            nodes = set(result.stdout.strip().splitlines())
+        except Exception:
+            nodes = set()
+        detected = {}
+        for comp, node_name in self._COMPONENT_NODES.items():
+            detected[comp] = node_name in nodes
+        self._ros_detect_cache = detected
+        self._ros_detect_time = now
+        return detected
+
+    def mission_state(self) -> dict[str, bool]:
+        """Return merged mission state (API-managed + externally detected)."""
+        state = dict(self._mission_components)
+        # For components not managed by _procs, check ROS nodes
+        with self._lock:
+            managed = set(self._procs.keys())
+        external = self._detect_ros_components()
+        for comp, active in external.items():
+            if comp not in managed:
+                state[comp] = active
+        return state
+
+    # --- Hardware node health (cached) ---
+    _HEALTH_NODES = {
+        'lidar': {'node': '/ldlidar', 'topic': '/scan_raw'},
+        'imu': {'node': '/imu_driver', 'topic': '/imu/data'},
+        'encoder': {'node': '/base_controller', 'topic': '/odom'},
+        'camera': {'node': '/oak', 'topic': '/oak/rgb/image_raw'},
+        'battery': {'node': None, 'topic': '/battery_state'},
+    }
+
+    def api_node_health(self) -> dict[str, Any]:
+        """Return live/stale status of hardware nodes and their topics."""
+        now = time.monotonic()
+        if now - self._node_health_time < 4.0 and self._node_health_cache:
+            return self._node_health_cache
+        # Get nodes
+        try:
+            r = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True, timeout=4.0)
+            nodes = set(r.stdout.strip().splitlines())
+        except Exception:
+            nodes = set()
+        # Get topics
+        try:
+            r = subprocess.run(['ros2', 'topic', 'list'], capture_output=True, text=True, timeout=4.0)
+            topics = set(r.stdout.strip().splitlines())
+        except Exception:
+            topics = set()
+        result = {}
+        for name, cfg in self._HEALTH_NODES.items():
+            node_ok = cfg['node'] in nodes if cfg['node'] else None
+            topic_ok = cfg['topic'] in topics if cfg['topic'] else None
+            if node_ok is None:
+                status = 'active' if topic_ok else 'offline'
+            elif node_ok and topic_ok:
+                status = 'active'
+            elif node_ok:
+                status = 'warn'
+            else:
+                status = 'offline'
+            result[name] = {
+                'status': status,
+                'node': cfg['node'],
+                'node_alive': node_ok,
+                'topic': cfg['topic'],
+                'topic_alive': topic_ok,
+            }
+        self._node_health_cache = result
+        self._node_health_time = now
+        return result
+
+    def api_battery_status(self) -> dict[str, Any]:
+        """Return latest /battery_state values with low/critical classification."""
+        now = time.monotonic()
+        if now - self._battery_time < 4.0 and self._battery_cache:
+            return self._battery_cache
+
+        out: dict[str, Any] = {
+            'available': False,
+            'voltage': None,
+            'percentage': None,
+            'state': 'offline',
+            'low_threshold': 0.20,
+            'critical_threshold': 0.10,
+        }
+        try:
+            result = subprocess.run(
+                [str(self.agv_sh), 'ros2', 'topic', 'echo', '/battery_state', '--once'],
+                capture_output=True,
+                text=True,
+                timeout=6.0,
+            )
+            text = result.stdout or ''
+            # Parse key lines from YAML-like echo output.
+            v_match = re.search(r'^voltage:\s*([^\n]+)$', text, flags=re.MULTILINE)
+            p_match = re.search(r'^percentage:\s*([^\n]+)$', text, flags=re.MULTILINE)
+
+            def _parse_float(raw: str) -> Optional[float]:
+                s = raw.strip()
+                if s in ('.nan', 'nan', 'NaN'):
+                    return None
+                try:
+                    return float(s)
+                except Exception:
+                    return None
+
+            voltage = _parse_float(v_match.group(1)) if v_match else None
+            percentage = _parse_float(p_match.group(1)) if p_match else None
+
+            out['voltage'] = voltage
+            out['percentage'] = percentage
+            out['available'] = voltage is not None or percentage is not None
+
+            if percentage is None:
+                out['state'] = 'unknown' if out['available'] else 'offline'
+            elif percentage <= out['critical_threshold']:
+                out['state'] = 'critical'
+            elif percentage <= out['low_threshold']:
+                out['state'] = 'low'
+            else:
+                out['state'] = 'normal'
+        except Exception:
+            pass
+
+        self._battery_cache = out
+        self._battery_time = now
+        return out
+
+    def _ros2_param_get(self, node_name: str, param_name: str, timeout_sec: float = 4.0) -> Optional[Any]:
+        try:
+            result = subprocess.run(
+                [str(self.agv_sh), 'ros2', 'param', 'get', node_name, param_name],
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+            if result.returncode != 0:
+                return None
+            text = (result.stdout or '').strip()
+            if ': ' not in text:
+                return None
+            raw = text.split(': ', 1)[1].strip()
+            if raw in ('true', 'false'):
+                return raw == 'true'
+            if raw.startswith("'") and raw.endswith("'"):
+                return raw[1:-1]
+            try:
+                if any(ch in raw for ch in ('.', 'e', 'E')):
+                    return float(raw)
+                return int(raw)
+            except Exception:
+                return raw
+        except Exception:
+            return None
+
+    def _ros2_param_set(self, node_name: str, param_name: str, value: Any, timeout_sec: float = 5.0) -> tuple[bool, str]:
+        try:
+            result = subprocess.run(
+                [str(self.agv_sh), 'ros2', 'param', 'set', node_name, param_name, str(value)],
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+            ok = result.returncode == 0
+            msg = (result.stdout or result.stderr or '').strip()
+            return ok, msg
+        except Exception as exc:
+            return False, str(exc)
+
+    def api_battery_params(self) -> dict[str, Any]:
+        params = {
+            'voltage_scale': self._ros2_param_get('/battery_node', 'voltage_scale'),
+            'battery_voltage_min': self._ros2_param_get('/battery_node', 'battery_voltage_min'),
+            'battery_voltage_max': self._ros2_param_get('/battery_node', 'battery_voltage_max'),
+            'percentage_mode': self._ros2_param_get('/battery_node', 'percentage_mode'),
+        }
+        return {
+            'available': all(v is not None for v in params.values()),
+            'params': params,
+        }
+
+    def api_battery_set_params(self, body: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        allowed = ('voltage_scale', 'battery_voltage_min', 'battery_voltage_max', 'percentage_mode')
+        updates = {k: body[k] for k in allowed if k in body}
+        if not updates:
+            return False, {'error': f'No params provided. Allowed: {allowed}'}
+
+        if 'percentage_mode' in updates:
+            mode = str(updates['percentage_mode']).strip()
+            if mode not in ('lifepo4_8s', 'linear'):
+                return False, {'error': 'percentage_mode must be one of: lifepo4_8s, linear'}
+            updates['percentage_mode'] = mode
+
+        if 'voltage_scale' in updates:
+            updates['voltage_scale'] = float(updates['voltage_scale'])
+        if 'battery_voltage_min' in updates:
+            updates['battery_voltage_min'] = float(updates['battery_voltage_min'])
+        if 'battery_voltage_max' in updates:
+            updates['battery_voltage_max'] = float(updates['battery_voltage_max'])
+
+        applied: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        for key, value in updates.items():
+            ok, msg = self._ros2_param_set('/battery_node', key, value)
+            if ok:
+                applied[key] = value
+            else:
+                errors[key] = msg
+
+        return len(errors) == 0, {
+            'applied': applied,
+            'errors': errors,
+            'current': self.api_battery_params(),
+        }
+
     def _emit_mission_state(self, component: str, active: bool, reason: str) -> None:
         if component in self._mission_components:
             self._mission_components[component] = bool(active)
-        active_components = [k for k, v in self._mission_components.items() if v]
+        merged = self.mission_state()
+        active_components = [k for k, v in merged.items() if v]
         self._publish_event(
             'mission_state_changed',
             {
@@ -102,7 +341,7 @@ class ApiApp:
                 'active': bool(active),
                 'reason': reason,
                 'active_components': active_components,
-                'mission_state': dict(self._mission_components),
+                'mission_state': merged,
             },
         )
 
@@ -605,7 +844,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                 'id': 0,
                 'type': 'snapshot',
                 'time_utc': _utc_now(),
-                'payload': {'status': app.status()},
+                'payload': {
+                    'status': app.status(),
+                    'mission_state': app.mission_state(),
+                    'node_health': app.api_node_health(),
+                    'battery': app.api_battery_status(),
+                },
             })
 
             while True:
@@ -616,7 +860,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                         'id': 0,
                         'type': 'heartbeat',
                         'time_utc': _utc_now(),
-                        'payload': {'status': app.status()},
+                        'payload': {
+                            'status': app.status(),
+                            'mission_state': app.mission_state(),
+                            'node_health': app.api_node_health(),
+                            'battery': app.api_battery_status(),
+                        },
                     }
                 self._send_sse_event(event)
         except (BrokenPipeError, ConnectionResetError):
@@ -662,6 +911,15 @@ class ApiHandler(BaseHTTPRequestHandler):
             if route == '/api/v1/status':
                 self._send_json(200, {'ok': True, 'data': app.status()})
                 return
+            if route == '/api/v1/node_health':
+                self._send_json(200, {'ok': True, 'data': app.api_node_health()})
+                return
+            if route == '/api/v1/battery':
+                self._send_json(200, {'ok': True, 'data': app.api_battery_status()})
+                return
+            if route == '/api/v1/battery/params':
+                self._send_json(200, {'ok': True, 'data': app.api_battery_params()})
+                return
             if route == '/api/v1/maps':
                 self._send_json(200, {'ok': True, 'data': app.api_list_maps()})
                 return
@@ -694,6 +952,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 '/api/v1/route/stop': lambda _b: app.api_route_stop(),
                 '/api/v1/config/validate': app.api_validate_configs,
                 '/api/v1/system/kill_ros': lambda _b: app.api_system_kill_ros(),
+                '/api/v1/battery/params': app.api_battery_set_params,
             }
 
             fn = routes.get(self.path)

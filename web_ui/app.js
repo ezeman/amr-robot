@@ -10,7 +10,14 @@ const state = {
     waypoint_record: false,
     route_follow: false,
   },
+  nodeHealth: {},
+  battery: null,
 };
+
+function defaultApiBaseUrl() {
+  const host = window.location.hostname || '127.0.0.1';
+  return `http://${host}:8088`;
+}
 
 function baseUrl() {
   return el('baseUrl').value.trim().replace(/\/$/, '');
@@ -33,6 +40,26 @@ function appendLog(target, message, payload) {
   const box = el(target);
   const line = `[${new Date().toLocaleTimeString()}] ${message}`;
   box.textContent = `${line}\n${payload ? JSON.stringify(payload, null, 2) : ''}\n\n${box.textContent}`;
+}
+
+function bindLogFoldButtons() {
+  const bindOne = (btnId, logId) => {
+    const btn = el(btnId);
+    const log = el(logId);
+    if (!btn || !log) return;
+    btn.onclick = () => {
+      const isHidden = log.hasAttribute('hidden');
+      if (isHidden) {
+        log.removeAttribute('hidden');
+        btn.textContent = 'hide';
+      } else {
+        log.setAttribute('hidden', 'hidden');
+        btn.textContent = 'view';
+      }
+    };
+  };
+  bindOne('btnToggleEventsLog', 'eventsLog');
+  bindOne('btnToggleResponseLog', 'responseLog');
 }
 
 function setPresetStatus(text) {
@@ -78,6 +105,82 @@ function refreshMissionUI() {
   }
 }
 
+function refreshHardwareUI() {
+  const idMap = { lidar: 'hwLidar', imu: 'hwImu', encoder: 'hwEncoder', camera: 'hwCamera', battery: 'hwBattery' };
+  for (const [name, info] of Object.entries(state.nodeHealth)) {
+    const statusEl = el(idMap[name]);
+    const item = statusEl?.closest('.hw-item');
+    if (!statusEl || !item) continue;
+    const st = info.status || 'offline';
+    item.setAttribute('data-state', st);
+    statusEl.textContent = st === 'active' ? 'ONLINE' : st === 'warn' ? 'NO DATA' : 'OFFLINE';
+  }
+
+  // Overlay battery condition from live battery payload if available.
+  const b = state.battery;
+  const battItem = document.querySelector('.hw-item[data-hw="battery"]');
+  const battStatus = el('hwBattery');
+  if (!battItem || !battStatus || !b) return;
+
+  if (b.state === 'critical') {
+    battItem.setAttribute('data-state', 'critical');
+    battStatus.textContent = 'CRITICAL';
+  } else if (b.state === 'low') {
+    battItem.setAttribute('data-state', 'warn');
+    battStatus.textContent = 'LOW';
+  } else if (b.state === 'normal') {
+    battItem.setAttribute('data-state', 'active');
+    battStatus.textContent = 'NORMAL';
+  }
+}
+
+function refreshBatteryDetails() {
+  const pct = el('hwBatteryPct');
+  const volt = el('hwBatteryVolt');
+  const b = state.battery;
+  if (!pct || !volt || !b) return;
+
+  pct.textContent = typeof b.percentage === 'number' ? `${(b.percentage * 100).toFixed(1)}%` : '--%';
+  volt.textContent = typeof b.voltage === 'number' ? `${b.voltage.toFixed(2)} V` : '-- V';
+}
+
+async function refreshBattery() {
+  try {
+    const battery = await apiGet('/api/v1/battery');
+    if (battery?.ok) {
+      state.battery = battery.data;
+      refreshBatteryDetails();
+      refreshHardwareUI();
+    }
+  } catch {
+    // Keep last known value if endpoint is temporarily unavailable.
+  }
+}
+
+async function refreshBatteryParams() {
+  try {
+    const out = await apiGet('/api/v1/battery/params');
+    const p = out?.data?.params;
+    if (!out?.ok || !p) return;
+    if (typeof p.voltage_scale === 'number') el('batteryScale').value = p.voltage_scale.toFixed(3);
+    if (typeof p.battery_voltage_min === 'number') el('batteryVmin').value = p.battery_voltage_min.toFixed(1);
+    if (typeof p.battery_voltage_max === 'number') el('batteryVmax').value = p.battery_voltage_max.toFixed(1);
+    if (typeof p.percentage_mode === 'string') el('batteryPctMode').value = p.percentage_mode;
+  } catch {
+    // Ignore if battery node is not up yet.
+  }
+}
+
+async function applyBatteryParams() {
+  await apiPost('/api/v1/battery/params', {
+    voltage_scale: Number(el('batteryScale').value),
+    battery_voltage_min: Number(el('batteryVmin').value),
+    battery_voltage_max: Number(el('batteryVmax').value),
+    percentage_mode: el('batteryPctMode').value,
+  });
+  await refreshBattery();
+}
+
 function handleEvent(ev) {
   let payload;
   try {
@@ -89,12 +192,23 @@ function handleEvent(ev) {
   appendLog('eventsLog', `event: ${ev.type}`, payload);
 
   if (ev.type === 'snapshot' || ev.type === 'heartbeat') {
-    const mission = payload?.payload?.status || payload?.payload?.mission_state;
+    const mission = payload?.payload?.mission_state || payload?.payload?.status;
     if (mission && typeof mission === 'object') {
       for (const key of Object.keys(state.mission)) {
         if (typeof mission[key] === 'boolean') state.mission[key] = mission[key];
       }
       refreshMissionUI();
+    }
+    const nh = payload?.payload?.node_health;
+    if (nh && typeof nh === 'object') {
+      state.nodeHealth = nh;
+      refreshHardwareUI();
+    }
+    const b = payload?.payload?.battery;
+    if (b && typeof b === 'object') {
+      state.battery = b;
+      refreshBatteryDetails();
+      refreshHardwareUI();
     }
   }
 
@@ -253,6 +367,7 @@ function bind() {
   el('btnCheckHealth').onclick = async () => {
     const out = await apiGet('/api/v1/health');
     el('apiState').textContent = out?.ok ? 'API: Healthy' : 'API: Error';
+    await refreshBattery();
   };
 
   el('btnConnectEvents').onclick = connectEvents;
@@ -305,9 +420,23 @@ function bind() {
   el('btnPresetSaveMap').onclick = () => runPreset('Save Fixed Map', presetSaveFixedMap);
   el('btnPresetStartDelivery').onclick = () => runPreset('Start Delivery Mission', presetStartDeliveryMission);
   el('btnPresetStopAll').onclick = () => runPreset('Stop All Mission', presetStopAllMission);
+
+  el('btnBatteryReadParams').onclick = refreshBatteryParams;
+  el('btnBatteryApplyParams').onclick = applyBatteryParams;
 }
 
 bind();
+bindLogFoldButtons();
+const baseInput = el('baseUrl');
+if (baseInput) {
+  const current = (baseInput.value || '').trim();
+  if (!current || current.includes('127.0.0.1') || current.includes('localhost')) {
+    baseInput.value = defaultApiBaseUrl();
+  }
+}
 refreshMaps();
 refreshRoutes();
 refreshMissionUI();
+refreshBattery();
+refreshBatteryParams();
+setInterval(refreshBattery, 5000);

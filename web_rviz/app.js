@@ -497,6 +497,7 @@ function disconnectRos(manual = true) {
   state.ros = null;
   state.connected = false;
   setConnStatus(manual ? 'ROS: Disconnected' : 'ROS: Connection lost', '#f15f6f');
+
 }
 
 function connectRos(origin = 'manual') {
@@ -608,6 +609,8 @@ function connectRos(origin = 'manual') {
       state.localPlan = msg.poses.map((p) => ({ x: p.pose.position.x, y: p.pose.position.y }));
       markSeen('localPlan');
     });
+
+
   });
 
   ros.on('error', () => {
@@ -778,6 +781,7 @@ function bindUI() {
   const angVal = byId('angSpeedVal');
   linSlider.oninput = () => { linVal.textContent = parseFloat(linSlider.value).toFixed(2); };
   angSlider.oninput = () => { angVal.textContent = parseFloat(angSlider.value).toFixed(2); };
+
 
   let teleopInterval = null;
   let teleopCmd = { linear: 0, angular: 0 };

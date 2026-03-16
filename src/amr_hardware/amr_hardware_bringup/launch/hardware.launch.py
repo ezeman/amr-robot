@@ -10,6 +10,7 @@ def generate_launch_description():
     use_lidar = LaunchConfiguration('use_lidar')
     use_imu = LaunchConfiguration('use_imu')
     use_base = LaunchConfiguration('use_base')
+    use_battery = LaunchConfiguration('use_battery')
 
     lidar_port = LaunchConfiguration('lidar_port')
     lidar_baud = LaunchConfiguration('lidar_baud')
@@ -31,10 +32,21 @@ def generate_launch_description():
     base_invert_right_motor = LaunchConfiguration('base_invert_right_motor')
     base_angular_sign = LaunchConfiguration('base_angular_sign')
 
+    battery_i2c_bus = LaunchConfiguration('battery_i2c_bus')
+    battery_i2c_address = LaunchConfiguration('battery_i2c_address')
+    battery_publish_rate_hz = LaunchConfiguration('battery_publish_rate_hz')
+    battery_voltage_min = LaunchConfiguration('battery_voltage_min')
+    battery_voltage_max = LaunchConfiguration('battery_voltage_max')
+    battery_voltage_scale = LaunchConfiguration('battery_voltage_scale')
+    battery_percentage_mode = LaunchConfiguration('battery_percentage_mode')
+    battery_i2c_retry_sec = LaunchConfiguration('battery_i2c_retry_sec')
+    battery_topic = LaunchConfiguration('battery_topic')
+
     return LaunchDescription([
         DeclareLaunchArgument('use_lidar', default_value='true', description='Start lidar driver'),
         DeclareLaunchArgument('use_imu', default_value='true', description='Start IMU driver'),
         DeclareLaunchArgument('use_base', default_value='true', description='Start base/motor driver'),
+        DeclareLaunchArgument('use_battery', default_value='true', description='Start battery I2C monitor'),
 
         DeclareLaunchArgument('lidar_port', default_value='/dev/lidar', description='Serial port for lidar'),
         DeclareLaunchArgument('lidar_baud', default_value='921600', description='Baudrate for lidar'),
@@ -65,6 +77,16 @@ def generate_launch_description():
             default_value='1.0',
             description='Multiply cmd_vel angular.z and odom yaw rate by this sign (+1.0 normal, -1.0 if turning is inverted).',
         ),
+
+        DeclareLaunchArgument('battery_i2c_bus', default_value='7', description='I2C bus number for battery module'),
+        DeclareLaunchArgument('battery_i2c_address', default_value='64', description='I2C address for battery module (decimal, 64 = 0x40)'),
+        DeclareLaunchArgument('battery_publish_rate_hz', default_value='2.0', description='Battery publish rate in Hz'),
+        DeclareLaunchArgument('battery_voltage_min', default_value='22.4', description='Voltage mapped to 0% battery (LiFePO4 8S)'),
+        DeclareLaunchArgument('battery_voltage_max', default_value='29.2', description='Voltage mapped to 100% battery (LiFePO4 8S)'),
+        DeclareLaunchArgument('battery_voltage_scale', default_value='2.547', description='Scale factor for voltage reading (calibrated)'),
+        DeclareLaunchArgument('battery_percentage_mode', default_value='lifepo4_8s', description='SOC mode: lifepo4_8s or linear'),
+        DeclareLaunchArgument('battery_i2c_retry_sec', default_value='5.0', description='Retry interval when I2C device is busy/unavailable'),
+        DeclareLaunchArgument('battery_topic', default_value='/battery_state', description='BatteryState topic name'),
 
         Node(
             condition=IfCondition(use_lidar),
@@ -115,6 +137,25 @@ def generate_launch_description():
                 'base_width': 0.4,
                 'invert_right_motor': ParameterValue(base_invert_right_motor, value_type=bool),
                 'angular_sign': ParameterValue(base_angular_sign, value_type=float),
+            }],
+        ),
+
+        Node(
+            condition=IfCondition(use_battery),
+            package='amr_battery_driver',
+            executable='battery_node',
+            name='battery_node',
+            output='screen',
+            parameters=[{
+                'i2c_bus': ParameterValue(battery_i2c_bus, value_type=int),
+                'i2c_address': ParameterValue(battery_i2c_address, value_type=int),
+                'publish_rate_hz': ParameterValue(battery_publish_rate_hz, value_type=float),
+                'battery_voltage_min': ParameterValue(battery_voltage_min, value_type=float),
+                'battery_voltage_max': ParameterValue(battery_voltage_max, value_type=float),
+                'voltage_scale': ParameterValue(battery_voltage_scale, value_type=float),
+                'percentage_mode': battery_percentage_mode,
+                'i2c_retry_sec': ParameterValue(battery_i2c_retry_sec, value_type=float),
+                'topic_name': battery_topic,
             }],
         ),
     ])
