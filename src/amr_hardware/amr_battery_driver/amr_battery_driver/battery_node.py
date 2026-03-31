@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 
+import json
 import math
+import os
+import tempfile
 from typing import Optional
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import BatteryState
+
+_BATTERY_STATE_FILE = os.path.join(tempfile.gettempdir(), 'battery_state.json')
 
 
 class Ina219Reader:
@@ -103,6 +108,7 @@ class BatteryNode(Node):
 
         if self._reader is None:
             self._pub.publish(msg)
+            self._dump_state(msg)
             return
 
         try:
@@ -114,6 +120,24 @@ class BatteryNode(Node):
             self.get_logger().warn(f'Battery read failed: {exc}', throttle_duration_sec=5.0)
 
         self._pub.publish(msg)
+        self._dump_state(msg)
+
+    def _dump_state(self, msg: BatteryState):
+        """Write latest battery state to a temp JSON file for external readers."""
+        try:
+            data = {
+                'voltage': None if not math.isfinite(msg.voltage) else round(msg.voltage, 3),
+                'percentage': None if not math.isfinite(msg.percentage) else round(msg.percentage, 4),
+                'current': None if not math.isfinite(msg.current) else round(msg.current, 3),
+                'present': msg.present,
+                'power_supply_status': int(msg.power_supply_status),
+            }
+            tmp = _BATTERY_STATE_FILE + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(data, f)
+            os.replace(tmp, _BATTERY_STATE_FILE)
+        except Exception:
+            pass
 
     def _try_init_reader(self, log_error: bool):
         self._last_retry_sec = self.get_clock().now().nanoseconds / 1e9

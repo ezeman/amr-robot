@@ -5,6 +5,7 @@ import queue
 import re
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -45,12 +46,13 @@ class ApiApp:
         self.logs_dir = self.workspace / 'log' / 'api'
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._procs: Dict[str, ManagedProc] = {}
         self._event_lock = threading.Lock()
         self._event_subscribers: list[queue.Queue] = []
         self._event_seq = 0
         self._mission_components = {
+            'bring_up': False,
             'slam': False,
             'localization': False,
             'navigation': False,
@@ -63,6 +65,8 @@ class ApiApp:
         self._node_health_time: float = 0.0
         self._battery_cache: dict[str, Any] = {}
         self._battery_time: float = 0.0
+        self._estop_cache: dict[str, Any] = {}
+        self._estop_time: float = 0.0
         self._route_progress_thread: Optional[threading.Thread] = None
         self._route_progress_stop = threading.Event()
         self._route_feedback_re = re.compile(
@@ -70,6 +74,17 @@ class ApiApp:
             r'distance_remaining=(?P<distance>[0-9.+-]+)\s+m\s+'
             r'recoveries=(?P<recoveries>-?\d+)'
         )
+        # Background health poller — keeps caches warm without blocking SSE.
+        self._health_stop = threading.Event()
+        self._health_thread = threading.Thread(
+            target=self._health_poll_loop, daemon=True, name='health-poll'
+        )
+        self._health_thread.start()
+        self._estop_stop = threading.Event()
+        self._estop_thread = threading.Thread(
+            target=self._estop_watch_loop, daemon=True, name='estop-watch'
+        )
+        self._estop_thread.start()
 
     def _next_event_id_locked(self) -> int:
         self._event_seq += 1
@@ -104,15 +119,183 @@ class ApiApp:
         'navigation': '/bt_navigator',
     }
 
+    def _health_poll_loop(self) -> None:
+        """Background thread: refresh health caches every ~8 s."""
+        while not self._health_stop.wait(8.0):
+            try:
+                self._detect_ros_components()
+            except Exception:
+                pass
+            try:
+                self.api_node_health()
+            except Exception:
+                pass
+            try:
+                self.api_battery_status()
+            except Exception:
+                pass
+            try:
+                self.api_estop_status()
+            except Exception:
+                pass
+
+    def _estop_watch_loop(self) -> None:
+        """Monitor E-Stop edges with a persistent pull-up request."""
+        prev_engaged: Optional[bool] = None
+        while not self._estop_stop.is_set():
+            try:
+                data = self._read_estop_once()
+                if data.get('engaged') is not None:
+                    self._estop_cache = data
+                    self._estop_time = time.monotonic()
+                    prev_engaged = data.get('engaged')
+
+                proc = subprocess.Popen(
+                    [
+                        'gpiomon', '-b', '-B', 'pull-up', '-F', '%e',
+                        self._ESTOP_GPIOCHIP, str(self._ESTOP_LINE),
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                try:
+                    while not self._estop_stop.is_set():
+                        line = proc.stdout.readline() if proc.stdout else ''
+                        if not line:
+                            break
+                        event = line.strip()
+                        if event not in ('0', '1'):
+                            continue
+                        gpio_value = 0 if event == '0' else 1
+                        engaged = (gpio_value == self._ESTOP_ACTIVE_VALUE)
+                        data = {
+                            'engaged': engaged,
+                            'gpio_value': gpio_value,
+                            'gpio_chip': self._ESTOP_GPIOCHIP,
+                            'gpio_line': self._ESTOP_LINE,
+                            'active_value': self._ESTOP_ACTIVE_VALUE,
+                        }
+                        self._estop_cache = data
+                        self._estop_time = time.monotonic()
+                        if prev_engaged is None or engaged != prev_engaged:
+                            prev_engaged = engaged
+                            self._publish_event('estop_changed', {'estop': data})
+                            if engaged:
+                                threading.Thread(
+                                    target=self._handle_estop_engaged,
+                                    daemon=True,
+                                    name='estop-trip-stop',
+                                ).start()
+                finally:
+                    if proc.poll() is None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=1.0)
+                        except Exception:
+                            proc.kill()
+            except Exception:
+                pass
+            self._estop_stop.wait(1.0)
+
+    def _cached_node_health(self) -> dict[str, Any]:
+        """Return cached health (never blocks on subprocess)."""
+        return self._node_health_cache or {}
+
+    def _cached_battery(self) -> dict[str, Any]:
+        """Return cached battery (never blocks on subprocess)."""
+        return self._battery_cache or {
+            'available': False, 'voltage': None, 'percentage': None,
+            'state': 'offline', 'low_threshold': 0.20, 'critical_threshold': 0.10,
+        }
+
+    def _cached_estop(self) -> dict[str, Any]:
+        """Return cached E-Stop state (never blocks on subprocess)."""
+        return self._estop_cache or {'engaged': None, 'gpio_value': None}
+
+    # --- E-Stop (Emergency Switch via GPIO) ---
+    # Jetson Orin Nano: Pin 32 (BOARD) = GPIO07 = PG.06 = gpiochip0 line 41
+    _ESTOP_GPIOCHIP = os.environ.get('AGV_ESTOP_GPIOCHIP', 'gpiochip0')
+    _ESTOP_LINE = int(os.environ.get('AGV_ESTOP_LINE', '41'))
+    # This E-Stop closes GND to pin 32 when pressed, so pressed = GPIO low.
+    _ESTOP_ACTIVE_VALUE = int(os.environ.get('AGV_ESTOP_ACTIVE_VALUE', '0'))
+
+    def _read_estop_once(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            'engaged': None,
+            'gpio_value': None,
+            'gpio_chip': self._ESTOP_GPIOCHIP,
+            'gpio_line': self._ESTOP_LINE,
+            'active_value': self._ESTOP_ACTIVE_VALUE,
+        }
+        try:
+            result = subprocess.run(
+                ['gpioget', '-B', 'pull-up', self._ESTOP_GPIOCHIP, str(self._ESTOP_LINE)],
+                capture_output=True, text=True, timeout=2.0,
+            )
+            val = int(result.stdout.strip())
+            out['gpio_value'] = val
+            out['engaged'] = (val == self._ESTOP_ACTIVE_VALUE)
+        except Exception:
+            pass
+        return out
+
+    def api_estop_status(self, force_refresh: bool = False) -> dict[str, Any]:
+        """Read E-Stop switch state from GPIO."""
+        now = time.monotonic()
+        if not force_refresh and self._estop_cache:
+            return self._estop_cache
+
+        out = self._read_estop_once()
+        self._estop_cache = out
+        self._estop_time = now
+        return out
+
+    def _is_estop_engaged(self) -> bool:
+        return bool(self.api_estop_status().get('engaged'))
+
+    def _reject_if_estop_engaged(self) -> Optional[tuple[bool, dict[str, Any]]]:
+        estop = self.api_estop_status()
+        if estop.get('engaged'):
+            return False, {
+                'error': 'E-Stop is engaged. Release E-Stop before starting a mission.',
+                'estop': estop,
+            }
+        return None
+
+    def _handle_estop_engaged(self) -> None:
+        stopped: list[str] = []
+        for name in ('route_follow', 'waypoint_record', 'navigation', 'localization', 'slam', 'bring_up'):
+            try:
+                ok, _ = self._stop_component(name)
+                if ok:
+                    stopped.append(name)
+            except Exception:
+                pass
+        self._publish_event('estop_trip', {
+            'estop': self._cached_estop(),
+            'stopped': stopped,
+        })
+
+    def _cached_mission_state(self) -> dict[str, bool]:
+        """Return mission state using cached external detect (never blocks)."""
+        state = dict(self._mission_components)
+        with self._lock:
+            managed = set(self._procs.keys())
+        for comp, active in self._ros_detect_cache.items():
+            if comp not in managed:
+                state[comp] = active
+        return state
+
     def _detect_ros_components(self) -> dict[str, bool]:
         """Check which mission components are running externally (not via _procs)."""
         now = time.monotonic()
-        if now - self._ros_detect_time < 5.0 and self._ros_detect_cache:
+        if now - self._ros_detect_time < 8.0 and self._ros_detect_cache:
             return self._ros_detect_cache
         try:
             result = subprocess.run(
                 ['ros2', 'node', 'list'],
-                capture_output=True, text=True, timeout=4.0,
+                capture_output=True, text=True, timeout=3.0,
             )
             nodes = set(result.stdout.strip().splitlines())
         except Exception:
@@ -148,29 +331,58 @@ class ApiApp:
     def api_node_health(self) -> dict[str, Any]:
         """Return live/stale status of hardware nodes and their topics."""
         now = time.monotonic()
-        if now - self._node_health_time < 4.0 and self._node_health_cache:
+        if now - self._node_health_time < 8.0 and self._node_health_cache:
             return self._node_health_cache
-        # Get nodes
+        # Single subprocess: get nodes
         try:
-            r = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True, timeout=4.0)
+            r = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True, timeout=3.0)
             nodes = set(r.stdout.strip().splitlines())
         except Exception:
             nodes = set()
-        # Get topics
+        # Single subprocess: get topics with publisher counts
+        topic_publishers: dict[str, int] = {}
         try:
-            r = subprocess.run(['ros2', 'topic', 'list'], capture_output=True, text=True, timeout=4.0)
-            topics = set(r.stdout.strip().splitlines())
+            r = subprocess.run(
+                ['ros2', 'topic', 'list', '-v'],
+                capture_output=True, text=True, timeout=3.0,
+            )
+            # Parse output: lines like " * /scan_raw [sensor_msgs/msg/LaserScan] 1 publisher"
+            in_published = False
+            for line in r.stdout.splitlines():
+                stripped = line.strip()
+                if stripped.startswith('Published topics:'):
+                    in_published = True
+                    continue
+                if stripped.startswith('Subscribed topics:'):
+                    in_published = False
+                    continue
+                if not in_published or not stripped.startswith('*'):
+                    continue
+                parts = stripped.split()
+                # parts: ['*', '/topic', '[type]', 'N', 'publisher(s)']
+                if len(parts) >= 4 and parts[1].startswith('/'):
+                    topic_name = parts[1]
+                    for i, p in enumerate(parts):
+                        if 'publisher' in p and i > 0:
+                            try:
+                                topic_publishers[topic_name] = int(parts[i - 1])
+                            except ValueError:
+                                pass
+                            break
         except Exception:
-            topics = set()
+            pass
+
         result = {}
         for name, cfg in self._HEALTH_NODES.items():
             node_ok = cfg['node'] in nodes if cfg['node'] else None
-            topic_ok = cfg['topic'] in topics if cfg['topic'] else None
+            topic_ok = topic_publishers.get(cfg['topic'], 0) > 0 if cfg['topic'] else None
             if node_ok is None:
                 status = 'active' if topic_ok else 'offline'
             elif node_ok and topic_ok:
                 status = 'active'
             elif node_ok:
+                status = 'warn'
+            elif topic_ok:
                 status = 'warn'
             else:
                 status = 'offline'
@@ -185,10 +397,12 @@ class ApiApp:
         self._node_health_time = now
         return result
 
+    _BATTERY_STATE_FILE = os.path.join(tempfile.gettempdir(), 'battery_state.json')
+
     def api_battery_status(self) -> dict[str, Any]:
         """Return latest /battery_state values with low/critical classification."""
         now = time.monotonic()
-        if now - self._battery_time < 4.0 and self._battery_cache:
+        if now - self._battery_time < 8.0 and self._battery_cache:
             return self._battery_cache
 
         out: dict[str, Any] = {
@@ -200,28 +414,14 @@ class ApiApp:
             'critical_threshold': 0.10,
         }
         try:
-            result = subprocess.run(
-                [str(self.agv_sh), 'ros2', 'topic', 'echo', '/battery_state', '--once'],
-                capture_output=True,
-                text=True,
-                timeout=6.0,
-            )
-            text = result.stdout or ''
-            # Parse key lines from YAML-like echo output.
-            v_match = re.search(r'^voltage:\s*([^\n]+)$', text, flags=re.MULTILINE)
-            p_match = re.search(r'^percentage:\s*([^\n]+)$', text, flags=re.MULTILINE)
-
-            def _parse_float(raw: str) -> Optional[float]:
-                s = raw.strip()
-                if s in ('.nan', 'nan', 'NaN'):
-                    return None
-                try:
-                    return float(s)
-                except Exception:
-                    return None
-
-            voltage = _parse_float(v_match.group(1)) if v_match else None
-            percentage = _parse_float(p_match.group(1)) if p_match else None
+            with open(self._BATTERY_STATE_FILE, 'r') as f:
+                data = json.load(f)
+            # File is stale if older than 10 seconds.
+            age = time.time() - os.path.getmtime(self._BATTERY_STATE_FILE)
+            if age > 10.0:
+                raise ValueError('stale battery file')
+            voltage = data.get('voltage')
+            percentage = data.get('percentage')
 
             out['voltage'] = voltage
             out['percentage'] = percentage
@@ -332,7 +532,7 @@ class ApiApp:
     def _emit_mission_state(self, component: str, active: bool, reason: str) -> None:
         if component in self._mission_components:
             self._mission_components[component] = bool(active)
-        merged = self.mission_state()
+        merged = self._cached_mission_state()
         active_components = [k for k, v in merged.items() if v]
         self._publish_event(
             'mission_state_changed',
@@ -478,7 +678,49 @@ class ApiApp:
         with self._lock:
             return self._status_locked()
 
+    # Processes that launch hardware nodes — only one may run at a time.
+    _HARDWARE_PROCS = frozenset({'bring_up', 'slam', 'localization', 'navigation'})
+
+    def _stop_systemd_mapping(self) -> None:
+        """Stop agv-mapping.service if it is active (avoids duplicate hardware)."""
+        try:
+            result = subprocess.run(
+                ['systemctl', '--user', 'is-active', '--quiet', 'agv-mapping.service'],
+                timeout=3,
+            )
+            if result.returncode == 0:
+                subprocess.run(
+                    ['systemctl', '--user', 'stop', 'agv-mapping.service'],
+                    timeout=10,
+                )
+        except Exception:
+            pass
+
+    def _stop_conflicting_procs(self, name: str) -> list[str]:
+        """Auto-stop any running hardware proc that conflicts with *name*."""
+        stopped: list[str] = []
+        if name not in self._HARDWARE_PROCS:
+            return stopped
+        for other in list(self._HARDWARE_PROCS - {name}):
+            with self._lock:
+                proc = self._procs.get(other)
+                alive = proc is not None and proc.process.poll() is None
+            if alive:
+                self._stop_proc(other)
+                stopped.append(other)
+        return stopped
+
     def _start_proc(self, name: str, cmd: list[str]) -> tuple[bool, dict[str, Any]]:
+        # --- mutual exclusion: stop conflicting hardware procs + systemd ---
+        if name in self._HARDWARE_PROCS:
+            # Stop systemd mapping in background (non-blocking)
+            threading.Thread(
+                target=self._stop_systemd_mapping, daemon=True
+            ).start()
+            stopped = self._stop_conflicting_procs(name)
+        else:
+            stopped = []
+
         with self._lock:
             self._cleanup_dead_locked()
             if name in self._procs and self._procs[name].process.poll() is None:
@@ -488,7 +730,7 @@ class ApiApp:
             logf = open(log_path, 'a', encoding='utf-8')
             env = os.environ.copy()
             # Skip preflight for processes that start hardware themselves
-            if name in ('slam',):
+            if name in self._HARDWARE_PROCS:
                 env['AGV_PREFLIGHT_TOPICS'] = '0'
             process = subprocess.Popen(
                 cmd,
@@ -512,6 +754,8 @@ class ApiApp:
                 'log_path': str(log_path),
                 'command': cmd,
             }
+            if stopped:
+                payload['auto_stopped'] = stopped
             self._publish_event('process_started', payload)
             self._emit_mission_state(name, True, 'process_started')
             if name == 'route_follow':
@@ -556,6 +800,20 @@ class ApiApp:
         if name == 'route_follow':
             self._stop_route_progress_monitor()
         return True, payload
+
+    def _stop_component(self, name: str) -> tuple[bool, dict[str, Any]]:
+        """Stop component: API-managed first, then external (systemd)."""
+        ok, data = self._stop_proc(name)
+        if ok:
+            return True, data
+        # Not API-managed — check if running externally via systemd
+        external = self._detect_ros_components()
+        if external.get(name, False):
+            self._stop_systemd_mapping()
+            self._ros_detect_time = 0.0  # invalidate cache
+            self._emit_mission_state(name, False, 'external_stop')
+            return True, {'name': name, 'stopped_via': 'systemd'}
+        return False, data
 
     def _map_yaml_path(self, value: str) -> Path:
         p = Path(value).expanduser()
@@ -626,8 +884,9 @@ class ApiApp:
                 items.append({'name': yaml_path.stem, 'yaml': str(yaml_path)})
         return {'items': items}
 
-    def api_slam_start(self, body: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        args = {
+    def _hw_launch_args(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Common launch arguments shared by bring_up and slam."""
+        return {
             'lidar_product': body.get('lidar_product', 'LDLiDAR_STL27L'),
             'lidar_baud': body.get('lidar_baud', 921600),
             'lidar_port': body.get('lidar_port', '/dev/lidar'),
@@ -635,11 +894,28 @@ class ApiApp:
             'topic_health_fail_grace_sec': body.get('topic_health_fail_grace_sec', 8.0),
             'base_angular_sign': body.get('base_angular_sign', 1.0),
         }
+
+    def api_bringup_start(self, body: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        blocked = self._reject_if_estop_engaged()
+        if blocked is not None:
+            return blocked
+        args = self._hw_launch_args(body)
+        cmd = [str(self.agv_sh), 'ros2', 'launch', 'amr_bringup', 'agv_bringup.launch.py'] + self._to_ros_args(args)
+        return self._start_proc('bring_up', cmd)
+
+    def api_bringup_stop(self) -> tuple[bool, dict[str, Any]]:
+        return self._stop_component('bring_up')
+
+    def api_slam_start(self, body: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        blocked = self._reject_if_estop_engaged()
+        if blocked is not None:
+            return blocked
+        args = self._hw_launch_args(body)
         cmd = [str(self.agv_sh), 'ros2', 'launch', 'amr_bringup', 'agv_mapping.launch.py'] + self._to_ros_args(args)
         return self._start_proc('slam', cmd)
 
     def api_slam_stop(self) -> tuple[bool, dict[str, Any]]:
-        return self._stop_proc('slam')
+        return self._stop_component('slam')
 
     def api_slam_save_map(self, body: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         map_name = str(body.get('map_name', '')).strip()
@@ -675,6 +951,9 @@ class ApiApp:
         return ok, payload
 
     def api_localization_start(self, body: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        blocked = self._reject_if_estop_engaged()
+        if blocked is not None:
+            return blocked
         map_yaml = self._map_yaml_path(str(body.get('map')))
         args = {
             'map': str(map_yaml),
@@ -686,9 +965,12 @@ class ApiApp:
         return self._start_proc('localization', cmd)
 
     def api_localization_stop(self) -> tuple[bool, dict[str, Any]]:
-        return self._stop_proc('localization')
+        return self._stop_component('localization')
 
     def api_navigation_start(self, body: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        blocked = self._reject_if_estop_engaged()
+        if blocked is not None:
+            return blocked
         map_yaml = self._map_yaml_path(str(body.get('map')))
         args = {
             'map': str(map_yaml),
@@ -701,9 +983,12 @@ class ApiApp:
         return self._start_proc('navigation', cmd)
 
     def api_navigation_stop(self) -> tuple[bool, dict[str, Any]]:
-        return self._stop_proc('navigation')
+        return self._stop_component('navigation')
 
     def api_waypoints_record_start(self, body: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        blocked = self._reject_if_estop_engaged()
+        if blocked is not None:
+            return blocked
         output_path = str(body.get('output_path', '')).strip()
         if not output_path:
             stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -736,6 +1021,9 @@ class ApiApp:
         return self._stop_proc('waypoint_record')
 
     def api_route_start(self, body: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        blocked = self._reject_if_estop_engaged()
+        if blocked is not None:
+            return blocked
         route = self._route_yaml_path(str(body.get('route')))
 
         cmd = [
@@ -846,9 +1134,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 'time_utc': _utc_now(),
                 'payload': {
                     'status': app.status(),
-                    'mission_state': app.mission_state(),
-                    'node_health': app.api_node_health(),
-                    'battery': app.api_battery_status(),
+                    'mission_state': app._cached_mission_state(),
+                    'node_health': app._cached_node_health(),
+                    'battery': app._cached_battery(),
+                    'estop': app._cached_estop(),
                 },
             })
 
@@ -862,9 +1151,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                         'time_utc': _utc_now(),
                         'payload': {
                             'status': app.status(),
-                            'mission_state': app.mission_state(),
-                            'node_health': app.api_node_health(),
-                            'battery': app.api_battery_status(),
+                            'mission_state': app._cached_mission_state(),
+                            'node_health': app._cached_node_health(),
+                            'battery': app._cached_battery(),
+                            'estop': app._cached_estop(),
                         },
                     }
                 self._send_sse_event(event)
@@ -917,6 +1207,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             if route == '/api/v1/battery':
                 self._send_json(200, {'ok': True, 'data': app.api_battery_status()})
                 return
+            if route == '/api/v1/estop':
+                self._send_json(200, {'ok': True, 'data': app.api_estop_status()})
+                return
             if route == '/api/v1/battery/params':
                 self._send_json(200, {'ok': True, 'data': app.api_battery_params()})
                 return
@@ -939,6 +1232,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             body = self._json_body()
 
             routes = {
+                '/api/v1/bringup/start': app.api_bringup_start,
+                '/api/v1/bringup/stop': lambda _b: app.api_bringup_stop(),
                 '/api/v1/slam/start': app.api_slam_start,
                 '/api/v1/slam/stop': lambda _b: app.api_slam_stop(),
                 '/api/v1/slam/save_map': app.api_slam_save_map,
@@ -961,6 +1256,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
 
             ok, data = fn(body)
+            data['mission_state'] = app._cached_mission_state()
             self._send_json(200 if ok else 400, {'ok': ok, 'data': data})
         except json.JSONDecodeError:
             self._send_json(400, {'ok': False, 'error': 'Invalid JSON body'})

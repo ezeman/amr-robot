@@ -7,9 +7,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260331-estop2" />
   </head>
   <body>
+    <div id="toasts" class="toasts"></div>
     <div class="bg-glow bg-glow-a"></div>
     <div class="bg-glow bg-glow-b"></div>
 
@@ -47,11 +48,17 @@
       <section class="card">
         <h2>Mission State</h2>
         <div class="state-grid">
+          <div class="state-item" data-name="bring_up">Bring Up</div>
           <div class="state-item" data-name="slam">SLAM</div>
           <div class="state-item" data-name="localization">Localization</div>
           <div class="state-item" data-name="navigation">Navigation</div>
           <div class="state-item" data-name="waypoint_record">Waypoint Record</div>
           <div class="state-item" data-name="route_follow">Route Follow</div>
+        </div>
+        <div id="estopBanner" class="estop-banner" data-state="unknown">
+          <span class="estop-icon">&#x1F6D1;</span>
+          <span class="estop-label">Emergency Stop</span>
+          <span class="estop-status" id="estopStatus">UNKNOWN</span>
         </div>
       </section>
 
@@ -132,12 +139,45 @@
           </label>
         </div>
         <div class="actions">
+          <button id="btnPresetBringUp" class="btn primary">Preset: Bring Up</button>
           <button id="btnPresetStartMapping" class="btn primary">Preset: Start Mapping</button>
           <button id="btnPresetSaveMap" class="btn">Preset: Save Fixed Map</button>
           <button id="btnPresetStartDelivery" class="btn primary">Preset: Start Delivery Mission</button>
           <button id="btnPresetStopAll" class="btn danger">Preset: Stop All Mission</button>
         </div>
         <p id="presetStatus" class="hint">Preset status: idle</p>
+      </section>
+
+      <section class="card">
+        <h2>Bring Up (Sensors Only)</h2>
+        <p class="hint">Start all hardware sensors and camera without SLAM mapping.</p>
+        <div class="actions">
+          <button id="btnBringUpStart" class="btn primary">Start Bring Up</button>
+          <button id="btnBringUpStop" class="btn danger">Stop Bring Up</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Localization & Navigation</h2>
+        <div class="grid two">
+          <label>
+            Map (name or full yaml path)
+            <input id="navMap" type="text" placeholder="corridor_fixed_v1" />
+          </label>
+          <label>
+            Yield Requester
+            <select id="useYield">
+              <option value="true" selected>Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnLocStart" class="btn primary">Start Localization</button>
+          <button id="btnLocStop" class="btn danger">Stop Localization</button>
+          <button id="btnNavStart" class="btn primary">Start Navigation</button>
+          <button id="btnNavStop" class="btn danger">Stop Navigation</button>
+        </div>
       </section>
 
       <section class="card">
@@ -219,29 +259,6 @@
       </section>
 
       <section class="card">
-        <h2>Localization & Navigation</h2>
-        <div class="grid two">
-          <label>
-            Map (name or full yaml path)
-            <input id="navMap" type="text" placeholder="corridor_fixed_v1" />
-          </label>
-          <label>
-            Yield Requester
-            <select id="useYield">
-              <option value="true" selected>Enabled</option>
-              <option value="false">Disabled</option>
-            </select>
-          </label>
-        </div>
-        <div class="actions">
-          <button id="btnLocStart" class="btn primary">Start Localization</button>
-          <button id="btnLocStop" class="btn danger">Stop Localization</button>
-          <button id="btnNavStart" class="btn primary">Start Navigation</button>
-          <button id="btnNavStop" class="btn danger">Stop Navigation</button>
-        </div>
-      </section>
-
-      <section class="card">
         <h2>System Tools</h2>
         <div class="actions">
           <button id="btnStatus" class="btn">Get Status</button>
@@ -267,6 +284,6 @@
       </section>
     </main>
 
-    <script src="./app.js" defer></script>
+    <script src="./app.js?v=20260331-estop2" defer></script>
   </body>
 </html>

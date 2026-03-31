@@ -4,6 +4,7 @@ const state = {
   events: null,
   presetBusy: false,
   mission: {
+    bring_up: false,
     slam: false,
     localization: false,
     navigation: false,
@@ -12,7 +13,23 @@ const state = {
   },
   nodeHealth: {},
   battery: null,
+  estop: null,
 };
+
+let sseReconnectDelay = 1000;
+let sseReconnectTimer = null;
+
+const estopLockedButtons = new Set([
+  'btnBringUpStart',
+  'btnSlamStart',
+  'btnLocStart',
+  'btnNavStart',
+  'btnRecordStart',
+  'btnRouteStart',
+  'btnPresetBringUp',
+  'btnPresetStartMapping',
+  'btnPresetStartDelivery',
+]);
 
 function defaultApiBaseUrl() {
   const host = window.location.hostname || '127.0.0.1';
@@ -40,6 +57,19 @@ function appendLog(target, message, payload) {
   const box = el(target);
   const line = `[${new Date().toLocaleTimeString()}] ${message}`;
   box.textContent = `${line}\n${payload ? JSON.stringify(payload, null, 2) : ''}\n\n${box.textContent}`;
+}
+
+function toast(msg, type = 'info') {
+  const c = el('toasts');
+  if (!c) return;
+  const d = document.createElement('div');
+  d.className = `toast toast-${type}`;
+  d.textContent = msg;
+  c.appendChild(d);
+  setTimeout(() => {
+    d.classList.add('fade-out');
+    setTimeout(() => d.remove(), 350);
+  }, 3200);
 }
 
 function bindLogFoldButtons() {
@@ -86,6 +116,14 @@ async function apiPost(path, body = {}) {
   });
   const data = await res.json();
   appendLog('responseLog', `POST ${path} -> ${res.status}`, data);
+  // Auto-update mission state from response
+  const ms = data?.data?.mission_state;
+  if (ms && typeof ms === 'object') {
+    for (const key of Object.keys(state.mission)) {
+      if (typeof ms[key] === 'boolean') state.mission[key] = ms[key];
+    }
+    refreshMissionUI();
+  }
   return data;
 }
 
@@ -101,6 +139,7 @@ function refreshMissionUI() {
   for (const [name, active] of Object.entries(state.mission)) {
     const node = document.querySelector(`.state-item[data-name="${name}"]`);
     if (!node) continue;
+    node.setAttribute('data-state', active ? 'running' : 'idle');
     node.classList.toggle('active', !!active);
   }
 }
@@ -142,6 +181,51 @@ function refreshBatteryDetails() {
 
   pct.textContent = typeof b.percentage === 'number' ? `${(b.percentage * 100).toFixed(1)}%` : '--%';
   volt.textContent = typeof b.voltage === 'number' ? `${b.voltage.toFixed(2)} V` : '-- V';
+}
+
+function refreshEstopUI() {
+  const banner = el('estopBanner');
+  const statusEl = el('estopStatus');
+  if (!banner || !statusEl) return;
+  const e = state.estop;
+  if (!e || e.engaged === null) {
+    banner.setAttribute('data-state', 'unknown');
+    statusEl.textContent = 'UNKNOWN';
+  } else if (e.engaged) {
+    banner.setAttribute('data-state', 'engaged');
+    statusEl.textContent = 'ENGAGED';
+  } else {
+    banner.setAttribute('data-state', 'released');
+    statusEl.textContent = 'RELEASED';
+  }
+  refreshEstopLocks();
+}
+
+function isEstopEngaged() {
+  return !!state.estop?.engaged;
+}
+
+function refreshEstopLocks() {
+  const locked = isEstopEngaged();
+  for (const id of estopLockedButtons) {
+    const btn = el(id);
+    if (!btn) continue;
+    btn.disabled = locked;
+    btn.classList.toggle('estop-locked', locked);
+    btn.title = locked ? 'Blocked while E-Stop is engaged' : '';
+  }
+}
+
+async function refreshEstop() {
+  try {
+    const out = await apiGet('/api/v1/estop');
+    if (out?.ok && out.data) {
+      state.estop = out.data;
+      refreshEstopUI();
+    }
+  } catch {
+    // Keep last known state if endpoint is temporarily unavailable.
+  }
 }
 
 async function refreshBattery() {
@@ -210,6 +294,11 @@ function handleEvent(ev) {
       refreshBatteryDetails();
       refreshHardwareUI();
     }
+    const es = payload?.payload?.estop;
+    if (es && typeof es === 'object') {
+      state.estop = es;
+      refreshEstopUI();
+    }
   }
 
   if (ev.type === 'mission_state_changed') {
@@ -221,10 +310,25 @@ function handleEvent(ev) {
       refreshMissionUI();
     }
   }
+
+  if (ev.type === 'estop_changed') {
+    const es = payload?.payload?.estop;
+    if (es && typeof es === 'object') {
+      state.estop = es;
+      refreshEstopUI();
+    }
+  }
 }
 
 function connectEvents() {
-  disconnectEvents();
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer);
+    sseReconnectTimer = null;
+  }
+  if (state.events) {
+    state.events.close();
+    state.events = null;
+  }
 
   const key = apiKey();
   const query = key ? `?api_key=${encodeURIComponent(key)}` : '';
@@ -233,18 +337,28 @@ function connectEvents() {
   state.events = new EventSource(url);
 
   state.events.onopen = () => {
+    sseReconnectDelay = 1000;
     el('sseState').textContent = 'Events: Connected';
+    el('sseState').classList.add('connected');
     appendLog('eventsLog', 'SSE connected', { url });
   };
 
   state.events.onerror = () => {
-    el('sseState').textContent = 'Events: Error';
+    el('sseState').textContent = 'Events: Reconnecting…';
+    el('sseState').classList.remove('connected');
+    if (state.events) {
+      state.events.close();
+      state.events = null;
+    }
+    sseReconnectTimer = setTimeout(connectEvents, sseReconnectDelay);
+    sseReconnectDelay = Math.min(sseReconnectDelay * 2, 30000);
   };
 
   const types = [
     'snapshot',
     'heartbeat',
     'mission_state_changed',
+    'estop_changed',
     'map_saved',
     'map_save_failed',
     'route_progress',
@@ -256,11 +370,17 @@ function connectEvents() {
 }
 
 function disconnectEvents() {
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer);
+    sseReconnectTimer = null;
+  }
+  sseReconnectDelay = 1000;
   if (state.events) {
     state.events.close();
     state.events = null;
   }
   el('sseState').textContent = 'Events: Disconnected';
+  el('sseState').classList.remove('connected');
 }
 
 function renderChips(containerId, items, onClick) {
@@ -293,6 +413,11 @@ async function refreshRoutes() {
 }
 
 async function runPreset(name, fn) {
+  if (isEstopEngaged()) {
+    toast('E-Stop is engaged. Release E-Stop before starting a preset.', 'error');
+    refreshEstopLocks();
+    return;
+  }
   if (state.presetBusy) {
     appendLog('responseLog', `Preset ${name} skipped`, { reason: 'another preset is running' });
     return;
@@ -312,12 +437,7 @@ async function runPreset(name, fn) {
 }
 
 async function presetStartMapping() {
-  await apiPostChecked('/api/v1/slam/start', {
-    lidar_product: el('slamLidarProduct').value.trim(),
-    lidar_baud: Number(el('slamLidarBaud').value),
-    lidar_port: el('slamLidarPort').value.trim(),
-    base_angular_sign: Number(el('baseAngularSign').value),
-  });
+  await apiPostChecked('/api/v1/slam/start', hwArgs());
 }
 
 async function presetSaveFixedMap() {
@@ -349,6 +469,10 @@ async function presetStartDeliveryMission() {
   el('routeFile').value = route;
 }
 
+async function presetBringUp() {
+  await apiPostChecked('/api/v1/bringup/start', hwArgs());
+}
+
 async function presetStopAllMission() {
   const endpoints = [
     '/api/v1/route/stop',
@@ -356,6 +480,7 @@ async function presetStopAllMission() {
     '/api/v1/navigation/stop',
     '/api/v1/localization/stop',
     '/api/v1/slam/stop',
+    '/api/v1/bringup/stop',
   ];
 
   for (const path of endpoints) {
@@ -363,59 +488,94 @@ async function presetStopAllMission() {
   }
 }
 
-function bind() {
-  el('btnCheckHealth').onclick = async () => {
-    const out = await apiGet('/api/v1/health');
-    el('apiState').textContent = out?.ok ? 'API: Healthy' : 'API: Error';
-    await refreshBattery();
+function actionBtn(id, fn) {
+  const btn = el(id);
+  if (!btn) return;
+  btn.onclick = async () => {
+    if (estopLockedButtons.has(id) && isEstopEngaged()) {
+      toast('E-Stop is engaged. Release E-Stop before starting.', 'error');
+      refreshEstopLocks();
+      return;
+    }
+    btn.disabled = true;
+    btn.classList.add('loading');
+    try {
+      const out = await fn();
+      if (out?.ok) {
+        btn.classList.add('success');
+        setTimeout(() => btn.classList.remove('success'), 1200);
+      } else {
+        toast(out?.data?.error || 'Operation failed', 'error');
+      }
+    } catch (err) {
+      toast(err.message || 'Operation failed', 'error');
+    } finally {
+      btn.disabled = estopLockedButtons.has(id) ? isEstopEngaged() : false;
+      btn.classList.remove('loading');
+    }
   };
+}
 
-  el('btnConnectEvents').onclick = connectEvents;
-  el('btnDisconnectEvents').onclick = disconnectEvents;
-
-  el('btnSlamStart').onclick = () => apiPost('/api/v1/slam/start', {
+function hwArgs() {
+  return {
     lidar_product: el('slamLidarProduct').value.trim(),
     lidar_baud: Number(el('slamLidarBaud').value),
     lidar_port: el('slamLidarPort').value.trim(),
     base_angular_sign: Number(el('baseAngularSign').value),
-  });
-  el('btnSlamStop').onclick = () => apiPost('/api/v1/slam/stop', {});
-  el('btnSaveMap').onclick = () => apiPost('/api/v1/slam/save_map', {
-    map_name: el('mapName').value.trim(),
-  });
+  };
+}
+
+function bind() {
+  el('btnCheckHealth').onclick = async () => {
+    const out = await apiGet('/api/v1/health');
+    el('apiState').textContent = out?.ok ? 'API: Healthy' : 'API: Error';
+    el('apiState').classList.toggle('connected', !!out?.ok);
+    await refreshBattery();
+  };
+
+  el('btnConnectEvents').onclick = connectEvents;
+  el('btnDisconnectEvents').onclick = () => disconnectEvents();
+
+  actionBtn('btnBringUpStart', () => apiPost('/api/v1/bringup/start', hwArgs()));
+  actionBtn('btnBringUpStop', () => apiPost('/api/v1/bringup/stop'));
+
+  actionBtn('btnSlamStart', () => apiPost('/api/v1/slam/start', hwArgs()));
+  actionBtn('btnSlamStop', () => apiPost('/api/v1/slam/stop'));
+  actionBtn('btnSaveMap', () => apiPost('/api/v1/slam/save_map', { map_name: el('mapName').value.trim() }));
   el('btnListMaps').onclick = refreshMaps;
 
-  el('btnLocStart').onclick = () => apiPost('/api/v1/localization/start', {
+  actionBtn('btnLocStart', () => apiPost('/api/v1/localization/start', {
     map: el('navMap').value.trim(),
     base_angular_sign: Number(el('baseAngularSign').value),
-  });
-  el('btnLocStop').onclick = () => apiPost('/api/v1/localization/stop', {});
+  }));
+  actionBtn('btnLocStop', () => apiPost('/api/v1/localization/stop'));
 
-  el('btnNavStart').onclick = () => apiPost('/api/v1/navigation/start', {
+  actionBtn('btnNavStart', () => apiPost('/api/v1/navigation/start', {
     map: el('navMap').value.trim(),
     use_yield_requester: el('useYield').value === 'true',
     base_angular_sign: Number(el('baseAngularSign').value),
-  });
-  el('btnNavStop').onclick = () => apiPost('/api/v1/navigation/stop', {});
+  }));
+  actionBtn('btnNavStop', () => apiPost('/api/v1/navigation/stop'));
 
-  el('btnRecordStart').onclick = () => apiPost('/api/v1/waypoints/record/start', {
+  actionBtn('btnRecordStart', () => apiPost('/api/v1/waypoints/record/start', {
     output_path: el('recordOutput').value.trim(),
-  });
-  el('btnRecordStop').onclick = () => apiPost('/api/v1/waypoints/record/stop', {});
+  }));
+  actionBtn('btnRecordStop', () => apiPost('/api/v1/waypoints/record/stop'));
 
-  el('btnRouteStart').onclick = () => apiPost('/api/v1/route/start', {
+  actionBtn('btnRouteStart', () => apiPost('/api/v1/route/start', {
     route: el('routeFile').value.trim(),
     yaw_mode: el('yawMode').value,
     start_mode: el('startMode').value,
     pause_sec: Number(el('pauseSec').value),
-  });
-  el('btnRouteStop').onclick = () => apiPost('/api/v1/route/stop', {});
+  }));
+  actionBtn('btnRouteStop', () => apiPost('/api/v1/route/stop'));
   el('btnListRoutes').onclick = refreshRoutes;
 
-  el('btnStatus').onclick = () => apiGet('/api/v1/status');
-  el('btnValidateConfig').onclick = () => apiPost('/api/v1/config/validate', { strict: false });
-  el('btnKillRos').onclick = () => apiPost('/api/v1/system/kill_ros', {});
+  actionBtn('btnStatus', () => apiGet('/api/v1/status'));
+  actionBtn('btnValidateConfig', () => apiPost('/api/v1/config/validate', { strict: false }));
+  actionBtn('btnKillRos', () => apiPost('/api/v1/system/kill_ros'));
 
+  el('btnPresetBringUp').onclick = () => runPreset('Bring Up', presetBringUp);
   el('btnPresetStartMapping').onclick = () => runPreset('Start Mapping', presetStartMapping);
   el('btnPresetSaveMap').onclick = () => runPreset('Save Fixed Map', presetSaveFixedMap);
   el('btnPresetStartDelivery').onclick = () => runPreset('Start Delivery Mission', presetStartDeliveryMission);
@@ -434,9 +594,26 @@ if (baseInput) {
     baseInput.value = defaultApiBaseUrl();
   }
 }
+
+// Auto-connect SSE and verify API on page load
+(async () => {
+  try {
+    const out = await apiGet('/api/v1/health');
+    el('apiState').textContent = out?.ok ? 'API: Healthy' : 'API: Error';
+    el('apiState').classList.toggle('connected', !!out?.ok);
+  } catch {
+    el('apiState').textContent = 'API: Offline';
+  }
+  await refreshEstop();
+  connectEvents();
+})();
+
 refreshMaps();
 refreshRoutes();
 refreshMissionUI();
 refreshBattery();
+refreshEstop();
 refreshBatteryParams();
 setInterval(refreshBattery, 5000);
+setInterval(refreshEstop, 1000);
+refreshEstopLocks();
