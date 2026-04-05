@@ -140,7 +140,7 @@ class ApiApp:
                 pass
 
     def _estop_watch_loop(self) -> None:
-        """Monitor E-Stop edges with a persistent pull-up request."""
+        """Monitor E-Stop edges with a persistent GPIO line request."""
         prev_engaged: Optional[bool] = None
         while not self._estop_stop.is_set():
             try:
@@ -151,10 +151,7 @@ class ApiApp:
                     prev_engaged = data.get('engaged')
 
                 proc = subprocess.Popen(
-                    [
-                        'gpiomon', '-b', '-B', 'pull-up', '-F', '%e',
-                        self._ESTOP_GPIOCHIP, str(self._ESTOP_LINE),
-                    ],
+                    self._build_estop_monitor_cmd(),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
                     text=True,
@@ -217,8 +214,26 @@ class ApiApp:
     # Jetson Orin Nano: Pin 32 (BOARD) = GPIO07 = PG.06 = gpiochip0 line 41
     _ESTOP_GPIOCHIP = os.environ.get('AGV_ESTOP_GPIOCHIP', 'gpiochip0')
     _ESTOP_LINE = int(os.environ.get('AGV_ESTOP_LINE', '41'))
+    _ESTOP_BIAS = os.environ.get('AGV_ESTOP_BIAS', '').strip().lower()
     # This E-Stop closes GND to pin 32 when pressed, so pressed = GPIO low.
     _ESTOP_ACTIVE_VALUE = int(os.environ.get('AGV_ESTOP_ACTIVE_VALUE', '0'))
+
+    def _estop_bias_args(self) -> list[str]:
+        if self._ESTOP_BIAS in ('pull-up', 'pull-down', 'disabled'):
+            return ['-B', self._ESTOP_BIAS]
+        return []
+
+    def _build_estop_monitor_cmd(self) -> list[str]:
+        return [
+            'gpiomon', '-b', *self._estop_bias_args(), '-F', '%e',
+            self._ESTOP_GPIOCHIP, str(self._ESTOP_LINE),
+        ]
+
+    def _build_estop_read_cmd(self) -> list[str]:
+        return [
+            'gpioget', *self._estop_bias_args(),
+            self._ESTOP_GPIOCHIP, str(self._ESTOP_LINE),
+        ]
 
     def _read_estop_once(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -226,11 +241,12 @@ class ApiApp:
             'gpio_value': None,
             'gpio_chip': self._ESTOP_GPIOCHIP,
             'gpio_line': self._ESTOP_LINE,
+            'bias': self._ESTOP_BIAS or 'default',
             'active_value': self._ESTOP_ACTIVE_VALUE,
         }
         try:
             result = subprocess.run(
-                ['gpioget', '-B', 'pull-up', self._ESTOP_GPIOCHIP, str(self._ESTOP_LINE)],
+                self._build_estop_read_cmd(),
                 capture_output=True, text=True, timeout=2.0,
             )
             val = int(result.stdout.strip())
